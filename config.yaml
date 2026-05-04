@@ -1,0 +1,56 @@
+# ============================================================
+#  Hermes Agent 配置 — 通用模板
+# ============================================================
+#  模型: DeepSeek V4 Pro (默认)
+#  如需切换模型，修改 models.default 部分即可
+#  支持: Anthropic, OpenAI, OpenRouter, DeepSeek 等 20+ 提供商
+#  完整配置参考: https://hermes-agent.nousresearch.com/docs/user-guide/configuration
+
+# --- 主模型 (DeepSeek V4 Pro, 支持思维链) ---
+models:
+  default:
+    provider: deepseek
+    model: deepseek-v4-pro
+    api_key: ${DEEPSEEK_API_KEY}
+    thinking:
+      type: enabled
+    reasoning_effort: high
+
+# --- 辅助任务模型 (DeepSeek V4 Flash, 节省成本) ---
+auxiliary:
+  default:
+    provider: deepseek
+    model: deepseek-v4-flash
+    api_key: ${DEEPSEEK_API_KEY}
+    thinking:
+      type: disabled
+  reasoning:
+    provider: deepseek
+    model: deepseek-v4-pro
+    api_key: ${DEEPSEEK_API_KEY}
+    thinking:
+      type: enabled
+    reasoning_effort: high
+
+# --- 回退模型 ---
+fallback:
+  provider: deepseek
+  model: deepseek-v4-flash
+  api_key: ${DEEPSEEK_API_KEY}
+  thinking:
+    type: disabled
+
+# --- Agent 行为 ---
+agent:
+  max_turns: 50
+  compression_threshold: 80000
+
+# --- 终端配置 ---
+terminal:
+  backend: local
+  cwd: ""                    # 留空 = 当前目录，可在启动器中切换
+  timeout: 180
+  lifetime_seconds: 300
+  auto_source_bashrc: false
+
+log_level: "INFO"

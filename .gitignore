@@ -1,0 +1,33 @@
+# 排除敏感文件
+.env
+*.key
+*.pem
+*.p12
+
+# 排除 Hermes 运行时数据
+.hermes/
+.hermes-win/
+*.db
+sessions/
+logs/
+cron/
+memories/
+
+# 排除虚拟环境
+.venv/
+.venv-hermes-win/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# 排除 IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 排除系统文件
+Thumbs.db
+Desktop.ini
+.DS_Store
