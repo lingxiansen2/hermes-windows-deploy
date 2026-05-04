@@ -19,29 +19,37 @@ pause
 echo.
 echo [1/5] Checking prerequisites...
 echo.
-set "PYTHON_CMD="
-py -3.12 --version >nul 2>&1 && set "PYTHON_CMD=py -3.12"
-if not defined PYTHON_CMD py -3.11 --version >nul 2>&1 && set "PYTHON_CMD=py -3.11"
-if not defined PYTHON_CMD python --version >nul 2>&1 && set "PYTHON_CMD=python"
-if not defined PYTHON_CMD python3 --version >nul 2>&1 && set "PYTHON_CMD=python3"
-if not defined PYTHON_CMD py --version >nul 2>&1 && set "PYTHON_CMD=py"
+call :detect_python
 if not defined PYTHON_CMD (
-    echo [ERROR] Python was not found.
-    echo         Install Python 3.12 from https://python.org and enable "Add Python to PATH".
-    pause
-    exit /b 1
+    echo [WARN] Python 3.11+ was not found.
+    echo        setup.bat will try to install Python 3.12 with winget.
+    where winget >nul 2>&1
+    if errorlevel 1 (
+        echo [ERROR] winget was not found.
+        echo         Install Python 3.12 from https://python.org, then run setup.bat again.
+        pause
+        exit /b 1
+    )
+    winget install --id Python.Python.3.12 -e --scope user --accept-package-agreements --accept-source-agreements
+    if errorlevel 1 (
+        echo [ERROR] winget failed to install Python 3.12.
+        echo         Install Python 3.12 manually from https://python.org, then run setup.bat again.
+        pause
+        exit /b 1
+    )
+    call :detect_python
 )
-%PYTHON_CMD% -c "import sys; raise SystemExit(0 if sys.version_info[:2] in ((3,11),(3,12)) else 1)" >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Unsupported Python version detected.
-    %PYTHON_CMD% --version
-    echo         Hermes Windows Deploy is tested with Python 3.11 or 3.12.
-    echo         Python 3.14 is too new for the current dependency set.
-    echo         Install Python 3.12, then run setup.bat again.
+if not defined PYTHON_CMD (
+    echo [ERROR] Python 3.12 was installed but is not visible in this terminal yet.
+    echo         Close this window, open a new cmd window, and run setup.bat again.
     pause
     exit /b 1
 )
 for /f "tokens=2" %%v in ('%PYTHON_CMD% --version 2^>^&1') do echo   [OK] Python %%v
+if defined PYTHON_UNTESTED (
+    echo [WARN] This Python version is newer than the tested range 3.11/3.12.
+    echo        Setup will continue, but if dependency installation fails, install Python 3.12 and rerun setup.
+)
 where git >nul 2>&1
 if errorlevel 1 (
     echo [WARN] Git was not found. Direct archive install will still be attempted.
@@ -93,13 +101,18 @@ if exist "%VENV_DIR%\Scripts\python.exe" (
 )
 set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "PIP=%VENV_DIR%\Scripts\pip.exe"
-"%PYTHON%" -c "import sys; raise SystemExit(0 if sys.version_info[:2] in ((3,11),(3,12)) else 1)" >nul 2>&1
+"%PYTHON%" -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Existing virtual environment uses an unsupported Python version.
+    echo [ERROR] Existing virtual environment uses Python older than 3.11.
     "%PYTHON%" --version
-    echo         Delete the .venv directory and rerun setup.bat with Python 3.11 or 3.12.
+    echo         Delete the .venv directory and rerun setup.bat with Python 3.11 or newer.
     pause
     exit /b 1
+)
+"%PYTHON%" -c "import sys; raise SystemExit(0 if sys.version_info[:2] <= (3,12) else 1)" >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] Existing virtual environment uses a newer untested Python version.
+    "%PYTHON%" --version
 )
 "%PYTHON%" -m pip install --upgrade pip
 if errorlevel 1 echo [WARN] Failed to upgrade pip. Continuing with existing pip.
@@ -115,7 +128,7 @@ if not exist "%HERMES_SOURCE%\pyproject.toml" (
 "%PYTHON%" -m pip install "%HERMES_SOURCE%"
 if errorlevel 1 (
     echo [ERROR] Failed to install Hermes Agent from bundled source.
-    echo         Check Python 3.11/3.12 and the local vendor\hermes-agent folder.
+    echo         Check Python, pip output, and the local vendor\hermes-agent folder.
     pause
     exit /b 1
 )
@@ -172,3 +185,18 @@ echo Useful check:
 echo   "%HERMES_EXE%" doctor
 echo.
 pause
+:detect_python
+set "PYTHON_CMD="
+set "PYTHON_UNTESTED="
+py -3.12 --version >nul 2>&1 && set "PYTHON_CMD=py -3.12"
+if not defined PYTHON_CMD py -3.11 --version >nul 2>&1 && set "PYTHON_CMD=py -3.11"
+if defined PYTHON_CMD exit /b 0
+python --version >nul 2>&1 && python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1 && set "PYTHON_CMD=python"
+if defined PYTHON_CMD python -c "import sys; raise SystemExit(0 if sys.version_info[:2] <= (3,12) else 1)" >nul 2>&1 || set "PYTHON_UNTESTED=1"
+if defined PYTHON_CMD exit /b 0
+python3 --version >nul 2>&1 && python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1 && set "PYTHON_CMD=python3"
+if defined PYTHON_CMD python3 -c "import sys; raise SystemExit(0 if sys.version_info[:2] <= (3,12) else 1)" >nul 2>&1 || set "PYTHON_UNTESTED=1"
+if defined PYTHON_CMD exit /b 0
+py --version >nul 2>&1 && py -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1 && set "PYTHON_CMD=py"
+if defined PYTHON_CMD py -c "import sys; raise SystemExit(0 if sys.version_info[:2] <= (3,12) else 1)" >nul 2>&1 || set "PYTHON_UNTESTED=1"
+exit /b 0

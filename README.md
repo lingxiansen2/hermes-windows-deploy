@@ -2,12 +2,12 @@
 Windows setup package for Hermes Agent.
 ## Requirements
 - Windows 10 or Windows 11
-- Python 3.11 or 3.12. Python 3.14 is not supported by this deploy package yet.
+- Python 3.11 or newer. Python 3.11/3.12 are tested; newer versions such as 3.14 are allowed with a warning.
 - Git for Windows recommended
 - Node.js optional, useful for some web and MCP workflows
 ## Quick Start
-1. Install Python 3.12 from https://python.org and enable "Add Python to PATH".
-2. Clone or download this repository.
+1. Clone or download this repository.
+2. If Python 3.11+ is not installed, setup.bat will try to install Python 3.12 with winget.
 3. Copy `.env.example` to `.env` if setup does not do it for you.
 4. Edit `.env` and fill in your API keys.
 5. Double-click `setup.bat`.
@@ -30,5 +30,5 @@ It does not use `pip install hermes-agent`, because Hermes Agent is not currentl
 - `vendor\hermes-agent` - bundled Hermes Agent source used by setup.
 ## Troubleshooting
 If setup prints text such as "not recognized as an internal or external command", make sure you are using the latest version of this repository. The batch files are intentionally ASCII-only so Windows cmd.exe can parse them on any locale.
-If setup says Python is unsupported, install Python 3.12 and rerun setup. If `.venv` was already created with Python 3.14, delete `.venv` first.
+If setup cannot install Python automatically, install Python 3.12 manually from https://python.org and rerun setup. Python 3.14 is not blocked, but dependency installation may still fail because it is newer than the tested range.
 If bundled source installation fails, make sure the `vendor\hermes-agent` folder exists and rerun setup.
