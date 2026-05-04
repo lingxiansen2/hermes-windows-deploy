@@ -11,7 +11,7 @@ echo.
 echo This setup will:
 echo   1. Check Python, Git, and Node.js
 echo   2. Create a local Python virtual environment
-echo   3. Install Hermes Agent from GitHub source
+echo   3. Install Hermes Agent from bundled source
 echo   4. Prepare .hermes config and optional skills
 echo   5. Register the Start Menu launcher
 echo.
@@ -104,12 +104,18 @@ if errorlevel 1 (
 "%PYTHON%" -m pip install --upgrade pip
 if errorlevel 1 echo [WARN] Failed to upgrade pip. Continuing with existing pip.
 echo.
-echo [3/5] Installing Hermes Agent from GitHub source...
-set "HERMES_SOURCE=https://github.com/NousResearch/hermes-agent/archive/refs/heads/main.zip"
+echo [3/5] Installing Hermes Agent from bundled source...
+set "HERMES_SOURCE=%SCRIPT_DIR%vendor\hermes-agent"
+if not exist "%HERMES_SOURCE%\pyproject.toml" (
+    echo [ERROR] Bundled Hermes source was not found: %HERMES_SOURCE%
+    echo         Download the full repository archive, not a partial file copy.
+    pause
+    exit /b 1
+)
 "%PYTHON%" -m pip install "%HERMES_SOURCE%"
 if errorlevel 1 (
-    echo [ERROR] Failed to install Hermes Agent from GitHub.
-    echo         Check network access to github.com and your Python 3.11/3.12 environment.
+    echo [ERROR] Failed to install Hermes Agent from bundled source.
+    echo         Check Python 3.11/3.12 and the local vendor\hermes-agent folder.
     pause
     exit /b 1
 )
