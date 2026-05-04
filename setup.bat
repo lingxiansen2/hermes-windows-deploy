@@ -11,7 +11,7 @@ echo.
 echo This setup will:
 echo   1. Check Python, Git, and Node.js
 echo   2. Create a local Python virtual environment
-echo   3. Install hermes-agent
+echo   3. Install Hermes Agent from GitHub source
 echo   4. Prepare .hermes config and optional skills
 echo   5. Register the Start Menu launcher
 echo.
@@ -20,19 +20,31 @@ echo.
 echo [1/5] Checking prerequisites...
 echo.
 set "PYTHON_CMD="
-python --version >nul 2>&1 && set "PYTHON_CMD=python"
+py -3.12 --version >nul 2>&1 && set "PYTHON_CMD=py -3.12"
+if not defined PYTHON_CMD py -3.11 --version >nul 2>&1 && set "PYTHON_CMD=py -3.11"
+if not defined PYTHON_CMD python --version >nul 2>&1 && set "PYTHON_CMD=python"
 if not defined PYTHON_CMD python3 --version >nul 2>&1 && set "PYTHON_CMD=python3"
 if not defined PYTHON_CMD py --version >nul 2>&1 && set "PYTHON_CMD=py"
 if not defined PYTHON_CMD (
     echo [ERROR] Python was not found.
-    echo         Install Python from https://python.org and enable "Add Python to PATH".
+    echo         Install Python 3.12 from https://python.org and enable "Add Python to PATH".
+    pause
+    exit /b 1
+)
+%PYTHON_CMD% -c "import sys; raise SystemExit(0 if sys.version_info[:2] in ((3,11),(3,12)) else 1)" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Unsupported Python version detected.
+    %PYTHON_CMD% --version
+    echo         Hermes Windows Deploy is tested with Python 3.11 or 3.12.
+    echo         Python 3.14 is too new for the current dependency set.
+    echo         Install Python 3.12, then run setup.bat again.
     pause
     exit /b 1
 )
 for /f "tokens=2" %%v in ('%PYTHON_CMD% --version 2^>^&1') do echo   [OK] Python %%v
 where git >nul 2>&1
 if errorlevel 1 (
-    echo [WARN] Git was not found. Install it from https://git-scm.com if Hermes needs Git operations.
+    echo [WARN] Git was not found. Direct archive install will still be attempted.
 ) else (
     for /f "tokens=3" %%v in ('git --version 2^>^&1') do echo   [OK] Git %%v
 )
@@ -81,17 +93,27 @@ if exist "%VENV_DIR%\Scripts\python.exe" (
 )
 set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "PIP=%VENV_DIR%\Scripts\pip.exe"
-"%PIP%" install --upgrade pip
-if errorlevel 1 echo [WARN] Failed to upgrade pip. Continuing with existing pip.
-echo.
-echo [3/5] Installing hermes-agent...
-"%PIP%" install hermes-agent
+"%PYTHON%" -c "import sys; raise SystemExit(0 if sys.version_info[:2] in ((3,11),(3,12)) else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Failed to install hermes-agent. Check network and Python environment.
+    echo [ERROR] Existing virtual environment uses an unsupported Python version.
+    "%PYTHON%" --version
+    echo         Delete the .venv directory and rerun setup.bat with Python 3.11 or 3.12.
     pause
     exit /b 1
 )
-echo   [OK] hermes-agent installed
+"%PYTHON%" -m pip install --upgrade pip
+if errorlevel 1 echo [WARN] Failed to upgrade pip. Continuing with existing pip.
+echo.
+echo [3/5] Installing Hermes Agent from GitHub source...
+set "HERMES_SOURCE=https://github.com/NousResearch/hermes-agent/archive/refs/heads/main.zip"
+"%PYTHON%" -m pip install "%HERMES_SOURCE%"
+if errorlevel 1 (
+    echo [ERROR] Failed to install Hermes Agent from GitHub.
+    echo         Check network access to github.com and your Python 3.11/3.12 environment.
+    pause
+    exit /b 1
+)
+echo   [OK] Hermes Agent installed
 set "HERMES_EXE=%VENV_DIR%\Scripts\hermes.exe"
 if not exist "%HERMES_EXE%" (
     echo [ERROR] hermes.exe was not found after installation.
