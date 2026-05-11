@@ -1,0 +1,188 @@
+name: Release
+
+# 推送 v* 格式的 tag 时触发（如 v0.12.0）
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # 允许创建 Release 和上传 Assets
+
+jobs:
+  # ── 构建 Windows GUI 启动器 (Hermes.exe) ─────────────────
+  build-exe:
+    name: 构建 Hermes.exe (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装 PyInstaller
+        run: pip install pyinstaller
+
+      - name: 构建 Hermes.exe
+        working-directory: launcher
+        run: pyinstaller Hermes_deploy.spec
+
+      - name: 验证产物
+        run: |
+          if (Test-Path launcher\dist\Hermes.exe) {
+            $size = [math]::Round((Get-Item launcher\dist\Hermes.exe).Length / 1MB, 1)
+            Write-Host "Hermes.exe built: $size MB"
+          } else {
+            Write-Host "[ERROR] Hermes.exe not found!"
+            exit 1
+          }
+
+      - name: 上传 Hermes.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-exe
+          path: launcher/dist/Hermes.exe
+          retention-days: 1
+
+  # ── 打包并发布 ──────────────────────────────────────────
+  package:
+    name: 打包并发布
+    runs-on: ubuntu-latest
+    needs: build-exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 解析版本号
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # ── 下载 Hermes.exe ──────────────────────────────────
+      - name: 下载 Hermes.exe
+        uses: actions/download-artifact@v4
+        with:
+          name: hermes-exe
+          path: launcher/
+
+      - name: 确认 Hermes.exe
+        run: |
+          ls -lh launcher/Hermes.exe
+          echo "EXE_SIZE=$(ls -lh launcher/Hermes.exe | awk '{print $5}')" >> "$GITHUB_ENV"
+
+      # ── 打包 Windows（zip）───────────────────────────────
+      - name: 打包 Windows zip
+        run: |
+          PKG="hermes-deploy-windows-${{ steps.version.outputs.VERSION }}"
+          mkdir -p "dist/$PKG/windows"
+          mkdir -p "dist/$PKG/vendor"
+          mkdir -p "dist/$PKG/launcher"
+
+          # 安装脚本
+          cp windows/install.ps1       "dist/$PKG/windows/"
+          cp windows/install.cmd       "dist/$PKG/windows/"
+          cp windows/install-extended.ps1 "dist/$PKG/windows/"
+
+          # 启动器
+          cp launcher/Hermes.exe       "dist/$PKG/launcher/"
+          cp launcher/icon.ico         "dist/$PKG/launcher/"
+          cp launcher/app_icon.png     "dist/$PKG/launcher/"
+          cp launcher/install_shortcut.ps1 "dist/$PKG/launcher/"
+
+          # 源码
+          cp -r vendor/hermes-agent "dist/$PKG/vendor/"
+
+          # 说明文件
+          cp README.md "dist/$PKG/"
+
+          cd dist
+          zip -r "../${PKG}.zip" "$PKG"
+          echo "WINDOWS_ZIP=${PKG}.zip" >> "$GITHUB_ENV"
+
+      # ── 打包 Linux（tar.gz）──────────────────────────────
+      - name: 打包 Linux tar.gz
+        run: |
+          PKG="hermes-deploy-linux-${{ steps.version.outputs.VERSION }}"
+          mkdir -p "dist/$PKG/linux"
+          mkdir -p "dist/$PKG/vendor"
+
+          # 安装脚本（保留可执行权限）
+          cp linux/install.sh "dist/$PKG/linux/"
+          chmod +x "dist/$PKG/linux/install.sh"
+
+          # 源码
+          cp -r vendor/hermes-agent "dist/$PKG/vendor/"
+
+          # 说明文件
+          cp README.md "dist/$PKG/"
+
+          cd dist
+          tar -czf "../${PKG}.tar.gz" "$PKG"
+          echo "LINUX_TARGZ=${PKG}.tar.gz" >> "$GITHUB_ENV"
+
+      # ── 生成 SHA256 校验文件 ──────────────────────────────
+      - name: 生成校验和
+        run: |
+          sha256sum "$WINDOWS_ZIP" "$LINUX_TARGZ" > checksums.txt
+          cat checksums.txt
+
+      # ── 创建 GitHub Release 并上传附件 ───────────────────
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## Hermes Agent 一键部署包  v${{ steps.version.outputs.VERSION }}
+
+            ### 下载
+
+            | 平台 | 文件 | 说明 |
+            |------|------|------|
+            | Windows 10/11 | `${{ env.WINDOWS_ZIP }}` | 含 GUI 启动器 (Hermes.exe ${{ env.EXE_SIZE }}) |
+            | Linux / macOS / WSL2 | `${{ env.LINUX_TARGZ }}` | 命令行安装 |
+
+            ### Windows 安装
+
+            **基础安装（仅 CLI）：**
+            ```
+            1. 下载并解压 ${{ env.WINDOWS_ZIP }}
+            2. 双击 windows\install.cmd
+            3. 重启终端后运行 hermes setup
+            ```
+
+            **拓展安装（含 GUI 启动器）：**
+            ```powershell
+            1. 下载并解压 ${{ env.WINDOWS_ZIP }}
+            2. Set-ExecutionPolicy Bypass -Scope Process -Force
+            3. .\windows\install-extended.ps1
+            4. 从开始菜单或桌面启动 "Hermes Agent"
+            ```
+
+            ### Linux / macOS / WSL2 安装
+            ```bash
+            tar -xzf ${{ env.LINUX_TARGZ }}
+            cd hermes-deploy-linux-${{ steps.version.outputs.VERSION }}
+            bash linux/install.sh
+            # 重载 shell 后运行 hermes setup
+            ```
+
+            ### 文件校验（SHA256）
+
+            详见附件 `checksums.txt`
+
+            ---
+
+            内置 Hermes Agent 版本：**v0.12.0**
+            上游项目：https://github.com/NousResearch/hermes-agent
+          files: |
+            ${{ env.WINDOWS_ZIP }}
+            ${{ env.LINUX_TARGZ }}
+            checksums.txt
+          draft: false
+          prerelease: false

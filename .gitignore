@@ -27,6 +27,12 @@ __pycache__/
 *.swp
 *.swo
 
+# 排除编译产物 (PyInstaller)
+launcher/Hermes.exe
+launcher/build/
+launcher/dist/
+*.spec.bak
+
 # 排除系统文件
 Thumbs.db
 Desktop.ini
