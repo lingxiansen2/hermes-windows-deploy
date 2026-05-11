@@ -21,7 +21,7 @@ echo [1/5] Checking prerequisites...
 echo.
 call :detect_python
 if not defined PYTHON_CMD (
-    echo [WARN] Python 3.11+ was not found.
+    echo [WARN] Python 3.11 or higher was not found.
     echo        setup.bat will try to install Python 3.12 with winget.
     where winget >nul 2>&1
     if errorlevel 1 (
@@ -40,15 +40,16 @@ if not defined PYTHON_CMD (
     call :detect_python
 )
 if not defined PYTHON_CMD (
-    echo [ERROR] Python 3.12 was installed but is not visible in this terminal yet.
+    echo [ERROR] Python was installed but is not visible in this terminal yet.
     echo         Close this window, open a new cmd window, and run setup.bat again.
     pause
     exit /b 1
 )
 for /f "tokens=2" %%v in ('%PYTHON_CMD% --version 2^>^&1') do echo   [OK] Python %%v
 if defined PYTHON_UNTESTED (
-    echo [WARN] This Python version is newer than the tested range 3.11/3.12.
-    echo        Setup will continue, but if dependency installation fails, install Python 3.12 and rerun setup.
+    echo [WARN] This Python version is newer than the tested range (3.11-3.12).
+    echo        Setup will continue, but if dependency installation fails,
+    echo        install Python 3.12 and rerun setup.
 )
 where git >nul 2>&1
 if errorlevel 1 (
@@ -111,7 +112,7 @@ if errorlevel 1 (
 )
 "%PYTHON%" -c "import sys; raise SystemExit(0 if sys.version_info[:2] <= (3,12) else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo [WARN] Existing virtual environment uses a newer untested Python version.
+    echo [WARN] Existing virtual environment uses a newer untested Python version (above 3.12).
     "%PYTHON%" --version
 )
 "%PYTHON%" -m pip install --upgrade pip
@@ -188,15 +189,24 @@ pause
 :detect_python
 set "PYTHON_CMD="
 set "PYTHON_UNTESTED="
-py -3.12 --version >nul 2>&1 && set "PYTHON_CMD=py -3.12"
-if not defined PYTHON_CMD py -3.11 --version >nul 2>&1 && set "PYTHON_CMD=py -3.11"
-if defined PYTHON_CMD exit /b 0
+:: 尝试 py launcher：从高到低检测 3.14 → 3.11
+for %%V in (3.14 3.13 3.12 3.11) do (
+    if not defined PYTHON_CMD (
+        py -%%V --version >nul 2>&1 && set "PYTHON_CMD=py -%%V"
+    )
+)
+:: 标记 > 3.12 为 untested（仅做警告，不阻止安装）
+if defined PYTHON_CMD (
+    %PYTHON_CMD% -c "import sys; raise SystemExit(0 if sys.version_info[:2] <= (3,12) else 1)" >nul 2>&1 || set "PYTHON_UNTESTED=1"
+    exit /b 0
+)
+:: 尝试 python 命令（用户可能直接装了 python 没有 py launcher）
 python --version >nul 2>&1 && python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1 && set "PYTHON_CMD=python"
-if defined PYTHON_CMD python -c "import sys; raise SystemExit(0 if sys.version_info[:2] <= (3,12) else 1)" >nul 2>&1 || set "PYTHON_UNTESTED=1"
-if defined PYTHON_CMD exit /b 0
+if defined PYTHON_CMD (
+    python -c "import sys; raise SystemExit(0 if sys.version_info[:2] <= (3,12) else 1)" >nul 2>&1 || set "PYTHON_UNTESTED=1"
+    exit /b 0
+)
+:: 尝试 python3 命令（Git Bash / MSYS2 环境）
 python3 --version >nul 2>&1 && python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1 && set "PYTHON_CMD=python3"
-if defined PYTHON_CMD python3 -c "import sys; raise SystemExit(0 if sys.version_info[:2] <= (3,12) else 1)" >nul 2>&1 || set "PYTHON_UNTESTED=1"
-if defined PYTHON_CMD exit /b 0
-py --version >nul 2>&1 && py -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1 && set "PYTHON_CMD=py"
-if defined PYTHON_CMD py -c "import sys; raise SystemExit(0 if sys.version_info[:2] <= (3,12) else 1)" >nul 2>&1 || set "PYTHON_UNTESTED=1"
-exit /b 0
+if defined PYTHON_CMD (
+    python3 -c "im

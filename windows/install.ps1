@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # Hermes Agent 安装脚本 — Windows
 # =============================================================================
 # 用法：
@@ -16,7 +16,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ── 常量 ──────────────────────────────────────────────────────────────────
-$PYTHON_VERSION = "3.11"
+$PYTHON_MIN_MAJOR = 3
+$PYTHON_MIN_MINOR = 11
+$PYTHON_INSTALL_FALLBACK = "3.12"   # 系统无合适版本时自动安装的版本
 
 # ── 打印函数 ──────────────────────────────────────────────────────────────
 function Write-Banner {
@@ -82,26 +84,114 @@ if (-not $UvCmd) {
 }
 success "uv 就绪：$UvCmd"
 
-# ── Step 2：确保 Python 3.11 ────────────────────────────────────────────────
-info "正在检查 Python $PYTHON_VERSION..."
+# ── Step 2：确保 Python >= 3.11 ──────────────────────────────────────────────
+info "正在检查 Python >= $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR..."
 $PythonOk = $false
+$FoundPyVersion = $null
+
+# 辅助函数：从 "Python 3.x.y" 提取 major.minor 并判断 >= 3.11
+function Test-PythonVersion {
+    param([string]$VersionStr)
+    # 匹配 "3.xx" 或 "3.xx.yy" 等格式
+    if ($VersionStr -match '(\d+)\.(\d+)') {
+        $major = [int]$Matches[1]
+        $minor = [int]$Matches[2]
+        return ($major -gt $PYTHON_MIN_MAJOR) -or `
+               ($major -eq $PYTHON_MIN_MAJOR -and $minor -ge $PYTHON_MIN_MINOR)
+    }
+    return $false
+}
+
+# 策略 1：用 uv python list 动态发现所有已安装版本，选最高的 >= 3.11
 try {
-    $p = & $UvCmd python find $PYTHON_VERSION 2>$null
-    if ($p) { $PythonOk = $true; success "Python 已找到：$(& $p --version 2>$null)" }
+    $uvList = & $UvCmd python list --only-installed 2>$null
+    if ($uvList) {
+        $bestVer = $null; $bestMajor = 0; $bestMinor = 0
+        foreach ($line in $uvList) {
+            if ($line -match 'cpython-(\d+)\.(\d+)') {
+                $maj = [int]$Matches[1]; $min = [int]$Matches[2]
+                $meetsMin = ($maj -gt $PYTHON_MIN_MAJOR) -or `
+                            ($maj -eq $PYTHON_MIN_MAJOR -and $min -ge $PYTHON_MIN_MINOR)
+                if ($meetsMin -and (($maj -gt $bestMajor) -or ($maj -eq $bestMajor -and $min -gt $bestMinor))) {
+                    $bestMajor = $maj; $bestMinor = $min
+                    $bestVer = "$maj.$min"
+                }
+            }
+        }
+        if ($bestVer) {
+            $p = & $UvCmd python find $bestVer 2>$null
+            if ($p) {
+                $PythonOk = $true
+                $FoundPyVersion = $bestVer
+                success "Python 已找到（通过 uv）：$(& $p --version 2>$null)"
+            }
+        }
+    }
 } catch {}
 
+# 策略 2：尝试系统 PATH 中的 python / python3 / py
 if (-not $PythonOk) {
-    info "未找到 Python $PYTHON_VERSION，通过 uv 安装..."
+    foreach ($cmd in @("python", "python3")) {
+        try {
+            $ver = & $cmd --version 2>$null
+            if ($ver -and (Test-PythonVersion $ver)) {
+                # 提取 major.minor 用于 venv
+                if ($ver -match '(\d+\.\d+)') { $FoundPyVersion = $Matches[1] }
+                $PythonOk = $true
+                success "Python 已找到（系统）：$ver"
+                break
+            } elseif ($ver) {
+                warn "发现 $ver，但版本低于 $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR，跳过"
+            }
+        } catch {}
+    }
+}
+
+# 策略 3：Windows py launcher（支持 py -3.xx）
+if (-not $PythonOk -and (Get-Command py -ErrorAction SilentlyContinue)) {
     try {
-        & $UvCmd python install $PYTHON_VERSION 2>&1 | Out-Null
-        $p = & $UvCmd python find $PYTHON_VERSION 2>$null
-        if ($p) { $PythonOk = $true; success "Python 安装完成：$(& $p --version 2>$null)" }
+        $pyList = py --list 2>$null
+        if ($pyList) {
+            $bestVer = $null; $bestMajor = 0; $bestMinor = 0
+            foreach ($line in $pyList) {
+                if ($line -match '(\d+)\.(\d+)') {
+                    $maj = [int]$Matches[1]; $min = [int]$Matches[2]
+                    $meetsMin = ($maj -gt $PYTHON_MIN_MAJOR) -or `
+                                ($maj -eq $PYTHON_MIN_MAJOR -and $min -ge $PYTHON_MIN_MINOR)
+                    if ($meetsMin -and (($maj -gt $bestMajor) -or ($maj -eq $bestMajor -and $min -gt $bestMinor))) {
+                        $bestMajor = $maj; $bestMinor = $min
+                        $bestVer = "$maj.$min"
+                    }
+                }
+            }
+            if ($bestVer) {
+                $FoundPyVersion = $bestVer
+                $PythonOk = $true
+                success "Python 已找到（py launcher）：$bestVer"
+            }
+        }
+    } catch {}
+}
+
+# 策略 4：以上全部失败，通过 uv 自动安装
+if (-not $PythonOk) {
+    info "未找到 Python >= $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR，通过 uv 安装 $PYTHON_INSTALL_FALLBACK..."
+    try {
+        & $UvCmd python install $PYTHON_INSTALL_FALLBACK 2>&1 | Out-Null
+        $p = & $UvCmd python find $PYTHON_INSTALL_FALLBACK 2>$null
+        if ($p) {
+            $PythonOk = $true
+            $FoundPyVersion = $PYTHON_INSTALL_FALLBACK
+            success "Python 安装完成：$(& $p --version 2>$null)"
+        }
     } catch {}
 }
 
 if (-not $PythonOk) {
-    err "Python $PYTHON_VERSION 安装失败。"
-    info "请手动安装：winget install Python.Python.3.11"
+    err "Python >= $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR 安装失败。"
+    info "请手动安装 Python 3.12 或更高版本："
+    info "  winget install Python.Python.3.12"
+    info "  或从 https://python.org 下载"
     pause; exit 1
 }
 
@@ -117,7 +207,7 @@ success "程序文件已部署到：$InstallDir"
 info "正在创建 Python 虚拟环境..."
 Push-Location $InstallDir
 if (Test-Path "venv") { Remove-Item -Recurse -Force "venv" }
-& $UvCmd venv venv --python $PYTHON_VERSION
+& $UvCmd venv venv --python $FoundPyVersion
 success "虚拟环境就绪"
 
 # ── Step 5：安装 Python 依赖（仅核心，不含 skills/RL）────────────────────────
@@ -138,88 +228,4 @@ if (-not $installed) {
     err "依赖安装失败，请检查网络连接后重试。"
     Pop-Location; pause; exit 1
 }
-success "Python 依赖安装完成"
-Pop-Location
-
-# ── Step 6：配置 PATH 与环境变量 ────────────────────────────────────────────
-info "正在配置环境变量..."
-$hermesBin = "$InstallDir\venv\Scripts"
-
-$curPath = [Environment]::GetEnvironmentVariable("Path","User")
-if ($curPath -notlike "*$hermesBin*") {
-    [Environment]::SetEnvironmentVariable("Path","$hermesBin;$curPath","User")
-    success "已将 $hermesBin 加入用户 PATH"
-} else {
-    info "PATH 已包含 hermes 目录，无需修改"
-}
-
-$curHome = [Environment]::GetEnvironmentVariable("HERMES_HOME","User")
-if ($curHome -ne $HermesHome) {
-    [Environment]::SetEnvironmentVariable("HERMES_HOME",$HermesHome,"User")
-    success "已设置 HERMES_HOME = $HermesHome"
-}
-$env:HERMES_HOME = $HermesHome
-$env:Path = "$hermesBin;$env:Path"
-
-# ── Step 7：初始化数据目录（最小化，不同步 skills）─────────────────────────
-info "正在初始化数据目录..."
-foreach ($sub in @("sessions","logs","memories","cron","hooks")) {
-    New-Item -ItemType Directory -Force -Path "$HermesHome\$sub" | Out-Null
-}
-
-# .env（首次创建模板，已有则保留）
-$envPath = "$HermesHome\.env"
-if (-not (Test-Path $envPath)) {
-    $tmpl = "$InstallDir\.env.example"
-    if (Test-Path $tmpl) { Copy-Item $tmpl $envPath }
-    else { New-Item -ItemType File -Force -Path $envPath | Out-Null }
-    success "已创建 $envPath  ← 请填入你的 API Key"
-} else {
-    info ".env 已存在，保留原文件"
-}
-
-# config.yaml
-$cfgPath = "$HermesHome\config.yaml"
-if (-not (Test-Path $cfgPath)) {
-    $tmpl = "$InstallDir\cli-config.yaml.example"
-    if (Test-Path $tmpl) {
-        Copy-Item $tmpl $cfgPath
-        success "已创建 $cfgPath"
-    }
-} else {
-    info "config.yaml 已存在，保留原文件"
-}
-
-success "数据目录就绪：$HermesHome"
-
-# ── Step 8：可选配置向导 ────────────────────────────────────────────────────
-if (-not $SkipSetup) {
-    hr
-    Write-Host ""
-    Write-Host "  下一步：配置你的 API Key" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  在新终端中运行：" -ForegroundColor White
-    Write-Host "    hermes setup" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "  或直接编辑：" -ForegroundColor White
-    Write-Host "    $envPath" -ForegroundColor Green
-    Write-Host ""
-}
-
-# ── 完成 ────────────────────────────────────────────────────────────────────
-hr
-Write-Host ""
-Write-Host "  ✓ 安装完成！" -ForegroundColor Green
-Write-Host ""
-Write-Host "  数据目录 " -NoNewline -ForegroundColor Gray; Write-Host $HermesHome
-Write-Host "  API Key  " -NoNewline -ForegroundColor Gray; Write-Host "$HermesHome\.env"
-Write-Host "  程序目录 " -NoNewline -ForegroundColor Gray; Write-Host $InstallDir
-Write-Host ""
-Write-Host "  重启终端后运行：" -ForegroundColor Yellow
-Write-Host "    hermes setup    ← 首次配置 API Key" -ForegroundColor Green
-Write-Host "    hermes          ← 开始对话" -ForegroundColor Green
-Write-Host ""
-Write-Host "  Skills 安装（可选，安装后再按需添加）：" -ForegroundColor Gray
-Write-Host "    hermes skills   ← 浏览可用 Skills" -ForegroundColor DarkGray
-Write-Host ""
-hr
+s
