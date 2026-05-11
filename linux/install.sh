@@ -249,17 +249,33 @@ success "虚拟环境就绪"
 
 # ── Step 8：安装 Python 依赖（核心 + 常用 extras，跳过 RL/skills）────────────
 info "安装 Python 依赖（首次可能需要几分钟）..."
+info "  如果卡住，请检查网络连接 / 代理设置"
 export VIRTUAL_ENV="$INSTALL_DIR/venv"
 
 installed=false
+last_error=""
 for spec in ".[messaging,mcp,pty,honcho,cron,cli]" "."; do
-    if $UV_CMD pip install -e "$spec" 2>/dev/null; then
-        installed=true; break
+    # 保存输出到临时文件，同时用户可看到最后几行进度
+    tmp_log=$(mktemp)
+    if $UV_CMD pip install -e "$spec" >"$tmp_log" 2>&1; then
+        installed=true
+        tail -2 "$tmp_log" 2>/dev/null | while IFS= read -r line; do info "    $line"; done
+        rm -f "$tmp_log"
+        break
+    else
+        last_error=$(tail -5 "$tmp_log" 2>/dev/null | tr '\n' ' ')
+        warn "    $spec 安装失败，尝试备选方案..."
+        rm -f "$tmp_log"
     fi
 done
 
 if ! $installed; then
     err "依赖安装失败，请检查网络连接后重试。"
+    if [[ -n "$last_error" ]]; then echo -e "  ${GRAY}${last_error}${NC}"; fi
+    info "常见原因："
+    info "  1. 网络不通 — 检查是否能访问 https://pypi.org"
+    info "  2. 代理/防火墙 — 尝试设置 pip 源为国内镜像"
+    info "  3. 磁盘空间不足 — 需要约 500 MB 空闲空间"
     exit 1
 fi
 success "Python 依赖安装完成"

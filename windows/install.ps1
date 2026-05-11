@@ -212,20 +212,131 @@ success "虚拟环境就绪"
 
 # ── Step 5：安装 Python 依赖（仅核心，不含 skills/RL）────────────────────────
 info "正在安装 Python 依赖（首次可能需要几分钟）..."
+info "  如果卡住，请检查网络连接 / 代理设置"
 $env:VIRTUAL_ENV = "$InstallDir\venv"
 
 # 只安装核心依赖，跳过 rl / optional-skills 等重型 extras
 $installed = $false
+$lastError = ""
 foreach ($spec in @(".[messaging,mcp,pty,honcho,cron,cli]", ".")) {
     try {
-        & $UvCmd pip install -e $spec 2>&1 | Out-Null
-        $installed = $true
-        break
-    } catch {}
+        $tmpLog = Join-Path $env:TEMP "hermes_install_$(Get-Random).log"
+        $proc = Start-Process -FilePath $UvCmd -ArgumentList "pip","install","-e",$spec -NoNewWindow -Wait -PassThru -RedirectStandardOutput $tmpLog -RedirectStandardError "$tmpLog.err"
+        $exitCode = $proc.ExitCode
+        # 显示日志尾行（帮助用户判断是否在正常下载）
+        if (Test-Path $tmpLog) {
+            $tail = Get-Content $tmpLog -Tail 2 -ErrorAction SilentlyContinue
+            if ($tail) { $tail | ForEach-Object { info "    $_" } }
+            Remove-Item $tmpLog -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path "$tmpLog.err") {
+            $errTail = Get-Content "$tmpLog.err" -Tail 3 -ErrorAction SilentlyContinue
+            if ($errTail) { $lastError = ($errTail -join "`n") }
+            Remove-Item "$tmpLog.err" -Force -ErrorAction SilentlyContinue
+        }
+        if ($exitCode -eq 0) {
+            $installed = $true
+            break
+        } else {
+            warn "    $spec 安装失败 (exit code: $exitCode)，尝试备选方案..."
+        }
+    } catch {
+        $lastError = $_.Exception.Message
+        warn "    $spec 安装异常: $lastError"
+    }
 }
 
 if (-not $installed) {
     err "依赖安装失败，请检查网络连接后重试。"
+    if ($lastError) { Write-Host "  $lastError" -ForegroundColor DarkGray }
+    info "常见原因："
+    info "  1. 网络不通 — 检查是否能访问 https://pypi.org"
+    info "  2. 代理/防火墙 — 尝试关闭系统代理或设置 pip 源为国内镜像"
+    info "  3. 磁盘空间不足 — 需要约 500 MB 空闲空间"
     Pop-Location; pause; exit 1
 }
-s
+success "Python 依赖安装完成"
+Pop-Location
+
+# ── Step 6：配置 PATH 与环境变量 ────────────────────────────────────────────
+info "正在配置环境变量..."
+$hermesBin = "$InstallDir\venv\Scripts"
+
+$curPath = [Environment]::GetEnvironmentVariable("Path","User")
+if ($curPath -notlike "*$hermesBin*") {
+    [Environment]::SetEnvironmentVariable("Path","$hermesBin;$curPath","User")
+    success "已将 $hermesBin 加入用户 PATH"
+} else {
+    info "PATH 已包含 hermes 目录，无需修改"
+}
+
+$curHome = [Environment]::GetEnvironmentVariable("HERMES_HOME","User")
+if ($curHome -ne $HermesHome) {
+    [Environment]::SetEnvironmentVariable("HERMES_HOME",$HermesHome,"User")
+    success "已设置 HERMES_HOME = $HermesHome"
+}
+$env:HERMES_HOME = $HermesHome
+$env:Path = "$hermesBin;$env:Path"
+
+# ── Step 7：初始化数据目录（最小化，不同步 skills）─────────────────────────
+info "正在初始化数据目录..."
+foreach ($sub in @("sessions","logs","memories","cron","hooks")) {
+    New-Item -ItemType Directory -Force -Path "$HermesHome\$sub" | Out-Null
+}
+
+# .env（首次创建模板，已有则保留）
+$envPath = "$HermesHome\.env"
+if (-not (Test-Path $envPath)) {
+    $tmpl = "$InstallDir\.env.example"
+    if (Test-Path $tmpl) { Copy-Item $tmpl $envPath }
+    else { New-Item -ItemType File -Force -Path $envPath | Out-Null }
+    success "已创建 $envPath  ← 请填入你的 API Key"
+} else {
+    info ".env 已存在，保留原文件"
+}
+
+# config.yaml
+$cfgPath = "$HermesHome\config.yaml"
+if (-not (Test-Path $cfgPath)) {
+    $tmpl = "$InstallDir\cli-config.yaml.example"
+    if (Test-Path $tmpl) {
+        Copy-Item $tmpl $cfgPath
+        success "已创建 $cfgPath"
+    }
+} else {
+    info "config.yaml 已存在，保留原文件"
+}
+
+success "数据目录就绪：$HermesHome"
+
+# ── Step 8：可选配置向导 ────────────────────────────────────────────────────
+if (-not $SkipSetup) {
+    hr
+    Write-Host ""
+    Write-Host "  下一步：配置你的 API Key" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  在新终端中运行：" -ForegroundColor White
+    Write-Host "    hermes setup" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  或直接编辑：" -ForegroundColor White
+    Write-Host "    $envPath" -ForegroundColor Green
+    Write-Host ""
+}
+
+# ── 完成 ────────────────────────────────────────────────────────────────────
+hr
+Write-Host ""
+Write-Host "  ✓ 安装完成！" -ForegroundColor Green
+Write-Host ""
+Write-Host "  数据目录 " -NoNewline -ForegroundColor Gray; Write-Host $HermesHome
+Write-Host "  API Key  " -NoNewline -ForegroundColor Gray; Write-Host "$HermesHome\.env"
+Write-Host "  程序目录 " -NoNewline -ForegroundColor Gray; Write-Host $InstallDir
+Write-Host ""
+Write-Host "  重启终端后运行：" -ForegroundColor Yellow
+Write-Host "    hermes setup    ← 首次配置 API Key" -ForegroundColor Green
+Write-Host "    hermes          ← 开始对话" -ForegroundColor Green
+Write-Host ""
+Write-Host "  Skills 安装（可选，安装后再按需添加）：" -ForegroundColor Gray
+Write-Host "    hermes skills   ← 浏览可用 Skills" -ForegroundColor DarkGray
+Write-Host ""
+hr

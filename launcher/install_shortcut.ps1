@@ -1,4 +1,4 @@
-﻿# Install Hermes Launcher shortcuts to Windows Start Menu
+# Install Hermes Launcher shortcuts to Windows Start Menu
 # Run:  powershell -ExecutionPolicy Bypass -File .\launcher\install_shortcut.ps1
 # Usage:
 #   .\install_shortcut.ps1                          （自动检测）
