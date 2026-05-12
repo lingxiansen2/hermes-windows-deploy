@@ -253,7 +253,7 @@ info "  下方会显示下载进度，请耐心等待"
 export VIRTUAL_ENV="$INSTALL_DIR/venv"
 
 installed=false
-for spec in ".[messaging,mcp,pty,honcho,cron,cli]" "."; do
+for spec in ".[messaging,mcp,pty,honcho,cron,cli]" ".[messaging,mcp,honcho,cron,cli]" "."; do
     echo ""
     info "  尝试安装: hermes-agent$spec"
     # 直接运行 uv，不隐藏输出 —— 用户能看到进度条

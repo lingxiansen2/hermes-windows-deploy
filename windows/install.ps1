@@ -216,8 +216,9 @@ info "  下方会显示下载进度，请耐心等待"
 $env:VIRTUAL_ENV = "$InstallDir\venv"
 
 # 只安装核心依赖，跳过 rl / optional-skills 等重型 extras
+# 三层降级：完整 → 去掉 pty（避免 pywinpty 需要 MSVC 编译工具）→ 裸装
 $installed = $false
-foreach ($spec in @(".[messaging,mcp,pty,honcho,cron,cli]", ".")) {
+foreach ($spec in @(".[messaging,mcp,pty,honcho,cron,cli]", ".[messaging,mcp,honcho,cron,cli]", ".")) {
     Write-Host ""
     info "  尝试安装: hermes-agent$spec"
     # 直接运行 uv，不隐藏任何输出 —— 用户能看到进度条
