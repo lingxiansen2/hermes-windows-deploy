@@ -109,17 +109,29 @@ jobs:
       - name: Verify hermes command
         shell: pwsh
         run: |
-          # Check .cmd wrapper exists and works
-          if (Test-Path "python\Scripts\hermes.cmd") {
-            Write-Host "hermes.cmd created"
-          } else {
-            Write-Host "[ERROR] hermes.cmd not found!"
-            Get-ChildItem python\Scripts\
+          # Check .cmd wrapper
+          if (-not (Test-Path "python\Scripts\hermes.cmd")) {
+            Write-Host "[ERROR] hermes.cmd not found!"; Get-ChildItem python\Scripts\; exit 1
+          }
+          Write-Host "hermes.cmd OK"
+          # Verify critical modules are importable
+          $modules = @("hermes_cli", "cron", "cli")
+          $ok = $true
+          foreach ($m in $modules) {
+            $err = & python\python.exe -c "import $m" 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "[ERROR] import $m failed: $err"
+              $ok = $false
+            } else {
+              Write-Host "import $m OK"
+            }
+          }
+          if (-not $ok) {
+            Write-Host "[ERROR] Critical modules missing — listing site-packages:"
+            Get-ChildItem python\Lib\site-packages\ -Directory | ForEach-Object { $_.Name }
             exit 1
           }
-          # Quick smoke test
-          $out = & python\python.exe -c "import hermes_cli; print('OK')" 2>&1
-          Write-Host "Import test: $out"
+          Write-Host "All critical modules verified"
 
       - name: Show bundle stats
         shell: pwsh
