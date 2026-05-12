@@ -84,7 +84,9 @@ jobs:
           mkdir -p "dist/$PKG/vendor"
           mkdir -p "dist/$PKG/launcher"
 
-          # 安装脚本
+          # 安装脚本（根级入口 + windows 子目录）
+          cp install.cmd               "dist/$PKG/"
+          cp install.ps1               "dist/$PKG/"
           cp windows/install.ps1       "dist/$PKG/windows/"
           cp windows/install.cmd       "dist/$PKG/windows/"
           cp windows/install-extended.ps1 "dist/$PKG/windows/"
@@ -112,7 +114,9 @@ jobs:
           mkdir -p "dist/$PKG/linux"
           mkdir -p "dist/$PKG/vendor"
 
-          # 安装脚本（保留可执行权限）
+          # 安装脚本（根级入口 + linux 子目录）
+          cp install.sh "dist/$PKG/"
+          chmod +x "dist/$PKG/install.sh"
           cp linux/install.sh "dist/$PKG/linux/"
           chmod +x "dist/$PKG/linux/install.sh"
 
@@ -152,7 +156,7 @@ jobs:
             **基础安装（仅 CLI）：**
             ```
             1. 下载并解压 ${{ env.WINDOWS_ZIP }}
-            2. 双击 windows\install.cmd
+            2. 双击 install.cmd
             3. 重启终端后运行 hermes setup
             ```
 
@@ -168,7 +172,7 @@ jobs:
             ```bash
             tar -xzf ${{ env.LINUX_TARGZ }}
             cd hermes-deploy-linux-${{ steps.version.outputs.VERSION }}
-            bash linux/install.sh
+            bash install.sh
             # 重载 shell 后运行 hermes setup
             ```
 
