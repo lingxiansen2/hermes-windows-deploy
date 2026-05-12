@@ -4,14 +4,14 @@
 *.pem
 *.p12
 
-# 排除 Hermes 运行时数据
+# Exclude Hermes runtime data (root-level only)
 .hermes/
 .hermes-win/
 *.db
-sessions/
-logs/
-cron/
-memories/
+/sessions/
+/logs/
+/cron/
+/memories/
 
 # 排除虚拟环境
 .venv/
