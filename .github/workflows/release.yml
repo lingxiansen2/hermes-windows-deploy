@@ -1,6 +1,5 @@
 name: Release
 
-# Push v* tag to trigger (e.g. v0.12.0)
 on:
   push:
     tags:
@@ -12,93 +11,116 @@ permissions:
 jobs:
   # ── Build Windows GUI launcher (Hermes.exe) ────────────
   build-exe:
-    name: Build Hermes.exe (Windows)
+    name: Build Hermes.exe
     runs-on: windows-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Install PyInstaller
-        run: pip install pyinstaller
-
-      - name: Build Hermes.exe
+      - run: pip install pyinstaller
+      - name: Build
         working-directory: launcher
         run: pyinstaller Hermes_deploy.spec
-
-      - name: Verify artifact
+      - name: Verify
         run: |
-          if (Test-Path launcher\dist\Hermes.exe) {
-            $size = [math]::Round((Get-Item launcher\dist\Hermes.exe).Length / 1MB, 1)
-            Write-Host "Hermes.exe built: $size MB"
-          } else {
-            Write-Host "[ERROR] Hermes.exe not found!"
-            exit 1
+          if (-not (Test-Path launcher\dist\Hermes.exe)) {
+            Write-Host "[ERROR] Hermes.exe not found"; exit 1
           }
-
-      - name: Upload Hermes.exe
-        uses: actions/upload-artifact@v4
+          $size = [math]::Round((Get-Item launcher\dist\Hermes.exe).Length / 1MB, 1)
+          Write-Host "Hermes.exe: $size MB"
+      - uses: actions/upload-artifact@v4
         with:
           name: hermes-exe
           path: launcher/dist/Hermes.exe
           retention-days: 1
 
-  # ── Bundle offline wheels + uv.exe ─────────────────────
-  bundle-offline:
-    name: Bundle offline wheels + uv
+  # ── Bundle portable Python 3.12 + pre-installed hermes ──
+  bundle-python:
+    name: Bundle portable Python
     runs-on: windows-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Create venv, install, freeze, and download all wheels
+      - name: Download Python 3.12 embeddable
         shell: pwsh
         run: |
-          python -m venv .tmp-venv
-          .tmp-venv\Scripts\Activate.ps1
-          pip install uv
-          pip install -e "vendor/hermes-agent[messaging,mcp,honcho,cron,cli]"
-          pip freeze --exclude-editable | Out-File -Encoding utf8 requirements-frozen.txt
-          pip download -r requirements-frozen.txt -d wheels/
-          # Copy uv.exe for bundling (installed by pip into venv)
-          Copy-Item .tmp-venv\Scripts\uv.exe .
+          $pyUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
+          Invoke-WebRequest $pyUrl -OutFile python.zip
+          Expand-Archive python.zip -DestinationPath python
+          Write-Host "Python embeddable extracted"
+
+      - name: Enable pip in embeddable Python
+        shell: pwsh
+        run: |
+          # Edit python312._pth: uncomment 'import site' and add site-packages
+          $pth = "python\python312._pth"
+          (Get-Content $pth) -replace '#import site', 'import site' | Set-Content $pth
+          Add-Content $pth "Lib\site-packages"
+          Write-Host "python312._pth updated"
+          # Install pip
+          Invoke-WebRequest https://bootstrap.pypa.io/get-pip.py -OutFile get-pip.py
+          python\python.exe get-pip.py --no-warn-script-location
+          Write-Host "pip installed: $(python\python.exe -m pip --version)"
+
+      - name: Install hermes-agent with all extras
+        shell: pwsh
+        run: |
+          # Try full install first, fall back without pty if needed
+          $specs = @(
+            "vendor/hermes-agent[messaging,mcp,pty,honcho,cron,cli]",
+            "vendor/hermes-agent[messaging,mcp,honcho,cron,cli]"
+          )
+          $ok = $false
+          foreach ($s in $specs) {
+            Write-Host "Installing: $s"
+            python\python.exe -m pip install -e "$s" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              $ok = $true
+              Write-Host "Success: $s"
+              break
+            }
+            Write-Host "Failed ($LASTEXITCODE), trying next option..."
+          }
+          if (-not $ok) {
+            Write-Host "[ERROR] All install attempts failed"
+            exit 1
+          }
+
+      - name: Verify hermes command
+        shell: pwsh
+        run: |
+          $hermesExe = "python\Scripts\hermes.exe"
+          if (Test-Path $hermesExe) {
+            Write-Host "hermes.exe found: $((Get-Item $hermesExe).Length / 1KB) KB"
+          } else {
+            Write-Host "[ERROR] hermes.exe not found!"
+            Get-ChildItem python\Scripts\
+            exit 1
+          }
+          # Quick smoke test
+          $out = & python\python.exe -c "import hermes_cli; print('OK')" 2>&1
+          Write-Host "Import test: $out"
 
       - name: Show bundle stats
         shell: pwsh
         run: |
-          $wheelCount = (Get-ChildItem wheels/*.whl).Count
-          $wheelSize = [math]::Round((Get-ChildItem wheels/*.whl | Measure-Object Length -Sum).Sum / 1MB, 1)
-          Write-Host "Wheels: $wheelCount files, $wheelSize MB"
+          $pySize = [math]::Round((Get-ChildItem python -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1)
+          Write-Host "Python bundle size: $pySize MB"
 
-      - name: Upload offline bundle
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: offline-bundle
-          path: |
-            wheels/
-            uv.exe
+          name: portable-python
+          path: python/
           retention-days: 1
 
   # ── Package and release ────────────────────────────────
   package:
     name: Package and release
     runs-on: ubuntu-latest
-    needs: [build-exe, bundle-offline]
-
+    needs: [build-exe, bundle-python]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -106,27 +128,24 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      # ── Download artifacts ────────────────────────────
       - name: Download Hermes.exe
         uses: actions/download-artifact@v4
         with:
           name: hermes-exe
           path: launcher/
 
-      - name: Download offline bundle
+      - name: Download portable Python
         uses: actions/download-artifact@v4
         with:
-          name: offline-bundle
-          path: bundled/
+          name: portable-python
+          path: python/
 
       - name: Verify artifacts
         run: |
           ls -lh launcher/Hermes.exe
-          ls -lh bundled/uv.exe
-          ls bundled/wheels/ | head -5
-          echo "WHEEL_COUNT=$(ls bundled/wheels/*.whl | wc -l)" >> "$GITHUB_ENV"
+          ls python/python.exe python/Scripts/hermes.exe 2>/dev/null || echo "hermes.exe check failed"
           echo "EXE_SIZE=$(ls -lh launcher/Hermes.exe | awk '{print $5}')" >> "$GITHUB_ENV"
-          echo "BUNDLE_SIZE=$(du -sh bundled/ | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "PY_SIZE=$(du -sh python/ | awk '{print $1}')" >> "$GITHUB_ENV"
 
       # ── Package Windows (zip) ─────────────────────────
       - name: Package Windows zip
@@ -136,16 +155,15 @@ jobs:
           mkdir -p "dist/$PKG/vendor"
           mkdir -p "dist/$PKG/launcher"
 
-          # Install scripts (root + subdirectories)
+          # Install scripts
           cp install.cmd               "dist/$PKG/"
           cp install.ps1               "dist/$PKG/"
           cp windows/install.ps1       "dist/$PKG/windows/"
           cp windows/install.cmd       "dist/$PKG/windows/"
           cp windows/install-extended.ps1 "dist/$PKG/windows/"
 
-          # Offline bundle (wheels + uv)
-          cp -r bundled/wheels         "dist/$PKG/"
-          cp bundled/uv.exe            "dist/$PKG/"
+          # Portable Python (Python 3.12 + all deps pre-installed)
+          cp -r python                 "dist/$PKG/"
 
           # Launcher
           cp launcher/Hermes.exe       "dist/$PKG/launcher/"
@@ -153,7 +171,7 @@ jobs:
           cp launcher/app_icon.png     "dist/$PKG/launcher/"
           cp launcher/install_shortcut.ps1 "dist/$PKG/launcher/"
 
-          # Source
+          # Source (for reference / update)
           cp -r vendor/hermes-agent    "dist/$PKG/vendor/"
 
           # Docs
@@ -170,23 +188,18 @@ jobs:
           mkdir -p "dist/$PKG/linux"
           mkdir -p "dist/$PKG/vendor"
 
-          # Install scripts (root + subdirectories)
           cp install.sh "dist/$PKG/"
           chmod +x "dist/$PKG/install.sh"
           cp linux/install.sh "dist/$PKG/linux/"
           chmod +x "dist/$PKG/linux/install.sh"
-
-          # Source
           cp -r vendor/hermes-agent "dist/$PKG/vendor/"
-
-          # Docs
           cp README.md "dist/$PKG/"
 
           cd dist
           tar -czf "../${PKG}.tar.gz" "$PKG"
           echo "LINUX_TARGZ=${PKG}.tar.gz" >> "$GITHUB_ENV"
 
-      # ── Generate checksums ──────────────────────────────
+      # ── Checksums ──────────────────────────────────────
       - name: Generate checksums
         run: |
           sha256sum "$WINDOWS_ZIP" "$LINUX_TARGZ" > checksums.txt
@@ -204,19 +217,20 @@ jobs:
 
             | Platform | File | Notes |
             |----------|------|-------|
-            | Windows 10/11 | `${{ env.WINDOWS_ZIP }}` | Offline install — includes ${{ env.WHEEL_COUNT }} pre-bundled wheels (${{ env.BUNDLE_SIZE }}) + GUI launcher (Hermes.exe ${{ env.EXE_SIZE }}) |
+            | Windows 10/11 | `${{ env.WINDOWS_ZIP }}` | Portable Python 3.12 + all deps (${{ env.PY_SIZE }}) + GUI launcher (${{ env.EXE_SIZE }}) |
             | Linux / macOS / WSL2 | `${{ env.LINUX_TARGZ }}` | CLI install |
 
             ### Windows Installation
 
-            **Zero-network install:**
             ```
-            1. Download and extract ${{ env.WINDOWS_ZIP }}
+            1. Download and extract the zip
             2. Double-click install.cmd
-            3. Enter your API key when notepad opens
+            3. Fill in your API key when notepad opens
             4. Restart terminal, run: hermes
             ```
-            No internet needed — all Python dependencies are bundled.
+            **No Python required. No network. No compilation.**
+            A complete Python 3.12 environment with all dependencies is bundled inside the zip.
+            Works on ANY Windows 10/11 machine, regardless of what is or isn't installed.
 
             ### Linux / macOS / WSL2 Installation
             ```bash

@@ -1,7 +1,7 @@
 @echo off
 :: =============================================================================
 :: Hermes Agent One-Click Installer - Windows Entry Point
-:: Double-click this file to begin. No PowerShell knowledge needed.
+:: Double-click this file to begin. No Python knowledge needed.
 :: =============================================================================
 
 echo.
@@ -19,13 +19,13 @@ if not exist "%~dp0windows\install.cmd" (
     exit /b 1
 )
 
-:: Delegate to windows\install.cmd (pass all arguments through)
+:: Delegate to windows\install.cmd
 call "%~dp0windows\install.cmd" %*
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo   Install failed, exit code: %ERRORLEVEL%
-    echo   Please screenshot the output above and submit an issue:
+    echo   Please screenshot the output and submit an issue:
     echo     https://github.com/lingxiansen2/hermes-windows-deploy/issues
     echo.
     pause

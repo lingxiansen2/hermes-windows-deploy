@@ -1,19 +1,18 @@
 # =============================================================================
-# Hermes Agent 一键安装 — PowerShell 入口（备选）
-# 推荐双击 install.cmd，本文件也可用 PowerShell 直接运行。
+# Hermes Agent One-Click Install - PowerShell entry (alternative)
+# Double-click install.cmd is preferred. Run this directly in PowerShell if needed.
 # =============================================================================
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Installer = Join-Path $ScriptDir "windows\install.ps1"
 
 if (-not (Test-Path $Installer)) {
-    Write-Host "  [ERROR] 找不到 windows\install.ps1" -ForegroundColor Red
-    Write-Host "  请解压完整的安装包后再运行本脚本。" -ForegroundColor Red
-    Write-Host "  安装包下载：https://github.com/lingxiansen2/hermes-windows-deploy/releases" -ForegroundColor Gray
+    Write-Host "  [ERROR] windows\install.ps1 not found" -ForegroundColor Red
+    Write-Host "  Please extract the full package before running." -ForegroundColor Red
+    Write-Host "  Download: https://github.com/lingxiansen2/hermes-windows-deploy/releases" -ForegroundColor Gray
     pause
     exit 1
 }
 
-# 委托到 windows\install.ps1（传递所有参数）
 & $Installer @args
 exit $LASTEXITCODE

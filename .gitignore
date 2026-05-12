@@ -33,9 +33,9 @@ launcher/build/
 launcher/dist/
 *.spec.bak
 
-# Exclude CI-bundled offline artifacts (generated, not source)
-wheels/
-uv.exe
+# Exclude CI-bundled portable Python (generated, not source)
+python/
+.tmp-venv/
 requirements-frozen.txt
 Thumbs.db
 Desktop.ini
