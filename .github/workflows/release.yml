@@ -67,15 +67,12 @@ jobs:
         run: |
           python -m venv .tmp-venv
           .tmp-venv\Scripts\Activate.ps1
+          pip install uv
           pip install -e "vendor/hermes-agent[messaging,mcp,honcho,cron,cli]"
           pip freeze --exclude-editable | Out-File -Encoding utf8 requirements-frozen.txt
           pip download -r requirements-frozen.txt -d wheels/
-
-      - name: Download uv.exe standalone
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.exe" -OutFile uv.exe
-          Write-Host "uv.exe size: $((Get-Item uv.exe).Length / 1MB) MB"
+          # Copy uv.exe for bundling (installed by pip into venv)
+          Copy-Item .tmp-venv\Scripts\uv.exe .
 
       - name: Show bundle stats
         shell: pwsh
