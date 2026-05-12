@@ -65,13 +65,11 @@ jobs:
       - name: Install uv
         run: pip install uv
 
-      - name: Install hermes-agent and download all wheels
+      - name: Download all wheels (resolve deps from pyproject.toml)
         shell: pwsh
         run: |
           Set-Location vendor/hermes-agent
-          uv pip install -e ".[messaging,mcp,honcho,cron,cli]"
-          uv pip freeze --exclude-editable | Out-File -Encoding utf8 ../../requirements-frozen.txt
-          uv pip download -r ../../requirements-frozen.txt -d ../../wheels/
+          uv pip download ".[messaging,mcp,honcho,cron,cli]" -d ../../wheels/
 
       - name: Download uv.exe standalone
         shell: pwsh
