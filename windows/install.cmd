@@ -1,6 +1,6 @@
 @echo off
 :: =============================================================================
-:: Hermes Agent Installer — Windows CMD Entry Point
+:: Hermes Agent Installer - Windows CMD Entry Point
 :: Double-click this file to start installation. No PowerShell knowledge needed.
 :: =============================================================================
 
