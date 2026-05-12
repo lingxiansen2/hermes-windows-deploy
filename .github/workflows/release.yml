@@ -92,8 +92,6 @@ jobs:
       - name: Replace hardcoded .exe launcher with portable .cmd
         shell: pwsh
         run: |
-          # pip install creates hermes.exe with ABSOLUTE CI path (D:\a\...)
-          # It breaks when moved to user machine. Replace with .cmd wrapper.
           $exePath = "python\Scripts\hermes.exe"
           $cmdPath = "python\Scripts\hermes.cmd"
           if (Test-Path $exePath) {
@@ -101,10 +99,11 @@ jobs:
             Write-Host "Removed hermes.exe (hardcoded CI path)"
           }
           # Portable .cmd: uses python.exe relative to Scripts\ (..\python.exe)
-          @"
-@echo off
-"%~dp0..\python.exe" -c "from hermes_cli.main import main; import sys; sys.argv[0]='hermes'; sys.exit(main())" %*
-"@ | Out-File -Encoding ascii $cmdPath
+          $lines = @(
+            '@echo off',
+            '"%~dp0..\python.exe" -c "from hermes_cli.main import main; import sys; sys.argv[0]=''hermes''; sys.exit(main())" %*'
+          )
+          [System.IO.File]::WriteAllLines($cmdPath, $lines, [System.Text.Encoding]::ASCII)
           Write-Host "Created portable hermes.cmd"
 
       - name: Verify hermes command
