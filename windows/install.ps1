@@ -1,10 +1,13 @@
 ﻿# =============================================================================
-# Hermes Agent 安装脚本 — Windows
+# Hermes Agent Installer — Windows (Offline-First)
 # =============================================================================
-# 用法：
+# Usage:
 #   .\install.ps1
-#   .\install.ps1 -SkipSetup          跳过交互式配置向导
-#   .\install.ps1 -HermesHome "D:\hermes"   自定义数据目录
+#   .\install.ps1 -SkipSetup          skip interactive setup wizard
+#   .\install.ps1 -HermesHome "D:\hermes"   custom data directory
+# =============================================================================
+# All Python dependencies are pre-bundled as wheels. No network needed.
+# Falls back to online install only if local wheels are incompatible.
 # =============================================================================
 
 param(
@@ -15,16 +18,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ── 常量 ──────────────────────────────────────────────────────────────────
+# ── Constants ──────────────────────────────────────────────────────────────
 $PYTHON_MIN_MAJOR = 3
 $PYTHON_MIN_MINOR = 11
-$PYTHON_INSTALL_FALLBACK = "3.12"   # 系统无合适版本时自动安装的版本
+$PYTHON_INSTALL_FALLBACK = "3.12"
 
-# ── 打印函数 ──────────────────────────────────────────────────────────────
+# ── Output helpers ─────────────────────────────────────────────────────────
 function Write-Banner {
     Write-Host ""
     Write-Host "  ┌────────────────────────────────────────────────┐" -ForegroundColor Magenta
-    Write-Host "  │    Hermes Agent  Windows 安装程序              │" -ForegroundColor Magenta
+    Write-Host "  │    Hermes Agent  Windows Installer             │" -ForegroundColor Magenta
     Write-Host "  │    by Nous Research  /  v0.12.0                │" -ForegroundColor Magenta
     Write-Host "  └────────────────────────────────────────────────┘" -ForegroundColor Magenta
     Write-Host ""
@@ -35,64 +38,80 @@ function warn    { param($m); Write-Host "  ⚠ $m" -ForegroundColor Yellow }
 function err     { param($m); Write-Host "  ✗ $m" -ForegroundColor Red }
 function hr      { Write-Host "  ─────────────────────────────────────────────────" -ForegroundColor DarkGray }
 
-# ── 定位 vendor 目录 ──────────────────────────────────────────────────────
+# ── Locate bundled resources ───────────────────────────────────────────────
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$VendorDir  = Join-Path (Split-Path $ScriptDir -Parent) "vendor\hermes-agent"
+$PkgRoot    = Split-Path $ScriptDir -Parent
+$VendorDir  = Join-Path $PkgRoot "vendor\hermes-agent"
+$WheelsDir  = Join-Path $PkgRoot "wheels"
+$UvExe      = Join-Path $PkgRoot "uv.exe"
 
 if (-not (Test-Path $VendorDir)) {
-    err "找不到 vendor\hermes-agent 目录"
-    err "请解压完整的安装包后再运行本脚本。"
-    err "预期路径：$VendorDir"
+    err "vendor\hermes-agent not found"
+    err "Please extract the full package before running this script."
+    err "Expected: $VendorDir"
     pause
     exit 1
 }
 
+$OfflineAvailable = (Test-Path $UvExe) -and (Test-Path $WheelsDir)
+$WheelCount = 0
+if ($OfflineAvailable) {
+    $WheelCount = (Get-ChildItem "$WheelsDir\*.whl" -ErrorAction SilentlyContinue).Count
+}
+
 Write-Banner
-info "源码路径：$VendorDir"
-info "安装目标：$InstallDir"
-info "数据目录：$HermesHome"
+info "Source:       $VendorDir"
+info "Install to:   $InstallDir"
+info "Data dir:     $HermesHome"
+if ($OfflineAvailable) {
+    success "Offline mode — $WheelCount wheels bundled, no network needed"
+} else {
+    warn "Offline bundle not found, will download dependencies from PyPI"
+}
 hr
 
-# ── Step 1：安装 uv ────────────────────────────────────────────────────────
-info "正在检查 uv..."
+# ── Step 1: Use bundled uv or find system uv ───────────────────────────────
 $UvCmd = $null
 
-foreach ($p in @("uv", "$env:USERPROFILE\.local\bin\uv.exe", "$env:USERPROFILE\.cargo\bin\uv.exe")) {
-    if ($p -eq "uv") {
-        if (Get-Command uv -ErrorAction SilentlyContinue) { $UvCmd = "uv"; break }
-    } elseif (Test-Path $p) {
-        $UvCmd = $p; break
+# Priority: bundled uv.exe > system PATH uv > install from network
+if (Test-Path $UvExe) {
+    $UvCmd = $UvExe
+    info "Using bundled uv.exe"
+} else {
+    info "Checking for uv..."
+    foreach ($p in @("uv", "$env:USERPROFILE\.local\bin\uv.exe", "$env:USERPROFILE\.cargo\bin\uv.exe")) {
+        if ($p -eq "uv") {
+            if (Get-Command uv -ErrorAction SilentlyContinue) { $UvCmd = "uv"; break }
+        } elseif (Test-Path $p) {
+            $UvCmd = $p; break
+        }
+    }
+    if (-not $UvCmd) {
+        info "uv not found, installing..."
+        try {
+            powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex" 2>&1 | Out-Null
+            $env:Path = [Environment]::GetEnvironmentVariable("Path","User") + ";" + [Environment]::GetEnvironmentVariable("Path","Machine")
+            foreach ($p in @("$env:USERPROFILE\.local\bin\uv.exe","$env:USERPROFILE\.cargo\bin\uv.exe")) {
+                if (Test-Path $p) { $UvCmd = $p; break }
+            }
+            if (-not $UvCmd -and (Get-Command uv -ErrorAction SilentlyContinue)) { $UvCmd = "uv" }
+        } catch {}
     }
 }
 
 if (-not $UvCmd) {
-    info "uv 未找到，正在安装..."
-    try {
-        powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex" 2>&1 | Out-Null
-        # 刷新 PATH 后再找一次
-        $env:Path = [Environment]::GetEnvironmentVariable("Path","User") + ";" + [Environment]::GetEnvironmentVariable("Path","Machine")
-        foreach ($p in @("$env:USERPROFILE\.local\bin\uv.exe","$env:USERPROFILE\.cargo\bin\uv.exe")) {
-            if (Test-Path $p) { $UvCmd = $p; break }
-        }
-        if (-not $UvCmd -and (Get-Command uv -ErrorAction SilentlyContinue)) { $UvCmd = "uv" }
-    } catch {}
-}
-
-if (-not $UvCmd) {
-    err "uv 安装失败。请手动安装后重试：https://docs.astral.sh/uv/"
+    err "uv not available. Please install manually: https://docs.astral.sh/uv/"
     pause; exit 1
 }
-success "uv 就绪：$UvCmd"
+success "uv ready: $UvCmd"
 
-# ── Step 2：确保 Python >= 3.11 ──────────────────────────────────────────────
-info "正在检查 Python >= $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR..."
+# ── Step 2: Ensure Python >= 3.11 ──────────────────────────────────────────
+info "Checking Python >= $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR..."
 $PythonOk = $false
 $FoundPyVersion = $null
 
-# 辅助函数：从 "Python 3.x.y" 提取 major.minor 并判断 >= 3.11
 function Test-PythonVersion {
     param([string]$VersionStr)
-    # 匹配 "3.xx" 或 "3.xx.yy" 等格式
     if ($VersionStr -match '(\d+)\.(\d+)') {
         $major = [int]$Matches[1]
         $minor = [int]$Matches[2]
@@ -102,7 +121,7 @@ function Test-PythonVersion {
     return $false
 }
 
-# 策略 1：用 uv python list 动态发现所有已安装版本，选最高的 >= 3.11
+# Strategy 1: uv python list — discover all installed versions, pick highest >= 3.11
 try {
     $uvList = & $UvCmd python list --only-installed 2>$null
     if ($uvList) {
@@ -123,31 +142,30 @@ try {
             if ($p) {
                 $PythonOk = $true
                 $FoundPyVersion = $bestVer
-                success "Python 已找到（通过 uv）：$(& $p --version 2>$null)"
+                success "Python found (via uv): $(& $p --version 2>$null)"
             }
         }
     }
 } catch {}
 
-# 策略 2：尝试系统 PATH 中的 python / python3 / py
+# Strategy 2: system PATH python / python3
 if (-not $PythonOk) {
     foreach ($cmd in @("python", "python3")) {
         try {
             $ver = & $cmd --version 2>$null
             if ($ver -and (Test-PythonVersion $ver)) {
-                # 提取 major.minor 用于 venv
                 if ($ver -match '(\d+\.\d+)') { $FoundPyVersion = $Matches[1] }
                 $PythonOk = $true
-                success "Python 已找到（系统）：$ver"
+                success "Python found (system): $ver"
                 break
             } elseif ($ver) {
-                warn "发现 $ver，但版本低于 $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR，跳过"
+                warn "Found $ver, below $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR, skipping"
             }
         } catch {}
     }
 }
 
-# 策略 3：Windows py launcher（支持 py -3.xx）
+# Strategy 3: Windows py launcher (py -3.xx)
 if (-not $PythonOk -and (Get-Command py -ErrorAction SilentlyContinue)) {
     try {
         $pyList = py --list 2>$null
@@ -167,110 +185,140 @@ if (-not $PythonOk -and (Get-Command py -ErrorAction SilentlyContinue)) {
             if ($bestVer) {
                 $FoundPyVersion = $bestVer
                 $PythonOk = $true
-                success "Python 已找到（py launcher）：$bestVer"
+                success "Python found (py launcher): $bestVer"
             }
         }
     } catch {}
 }
 
-# 策略 4：以上全部失败，通过 uv 自动安装
+# Strategy 4: auto-install via uv
 if (-not $PythonOk) {
-    info "未找到 Python >= $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR，通过 uv 安装 $PYTHON_INSTALL_FALLBACK..."
+    info "Python >= $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR not found, installing $PYTHON_INSTALL_FALLBACK via uv..."
     try {
         & $UvCmd python install $PYTHON_INSTALL_FALLBACK 2>&1 | Out-Null
         $p = & $UvCmd python find $PYTHON_INSTALL_FALLBACK 2>$null
         if ($p) {
             $PythonOk = $true
             $FoundPyVersion = $PYTHON_INSTALL_FALLBACK
-            success "Python 安装完成：$(& $p --version 2>$null)"
+            success "Python installed: $(& $p --version 2>$null)"
         }
     } catch {}
 }
 
 if (-not $PythonOk) {
-    err "Python >= $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR 安装失败。"
-    info "请手动安装 Python 3.12 或更高版本："
+    err "Python >= $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR could not be installed."
+    info "Please install Python 3.12+ manually:"
     info "  winget install Python.Python.3.12"
-    info "  或从 https://python.org 下载"
+    info "  or download from https://python.org"
     pause; exit 1
 }
 
-# ── Step 3：复制源码到安装目录 ────────────────────────────────────────────
-info "正在部署程序文件..."
+# ── Step 3: Copy source to install directory ───────────────────────────────
+info "Deploying program files..."
 $parent = Split-Path $InstallDir -Parent
 if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
 if (Test-Path $InstallDir)    { Remove-Item -Recurse -Force $InstallDir }
 Copy-Item -Recurse -Path $VendorDir -Destination $InstallDir
-success "程序文件已部署到：$InstallDir"
+success "Files deployed to: $InstallDir"
 
-# ── Step 4：创建虚拟环境 ────────────────────────────────────────────────────
-info "正在创建 Python 虚拟环境..."
+# ── Step 4: Create virtual environment ─────────────────────────────────────
+info "Creating Python virtual environment..."
 Push-Location $InstallDir
 if (Test-Path "venv") { Remove-Item -Recurse -Force "venv" }
 & $UvCmd venv venv --python $FoundPyVersion
-success "虚拟环境就绪"
+success "Virtual environment ready"
 
-# ── Step 5：安装 Python 依赖（仅核心，不含 skills/RL）────────────────────────
-info "正在安装 Python 依赖（首次可能需要几分钟）..."
-info "  下方会显示下载进度，请耐心等待"
+# ── Step 5: Install Python dependencies (offline-first) ────────────────────
 $env:VIRTUAL_ENV = "$InstallDir\venv"
 
-# 只安装核心依赖，跳过 rl / optional-skills 等重型 extras
-# 三层降级：完整 → 去掉 pty（避免 pywinpty 需要 MSVC 编译工具）→ 裸装
+# Offline mode: install from bundled wheels (no network)
+# Falls back to online install only if wheels are incompatible
 $installed = $false
-foreach ($spec in @(".[messaging,mcp,pty,honcho,cron,cli]", ".[messaging,mcp,honcho,cron,cli]", ".")) {
-    Write-Host ""
-    info "  尝试安装: hermes-agent$spec"
-    # 直接运行 uv，不隐藏任何输出 —— 用户能看到进度条
-    & $UvCmd pip install -e $spec
-    if ($LASTEXITCODE -eq 0) {
-        $installed = $true
-        break
+$triedOffline = $false
+
+if ($OfflineAvailable -and $WheelCount -gt 0) {
+    $triedOffline = $true
+    foreach ($spec in @(".[messaging,mcp,pty,honcho,cron,cli]", ".[messaging,mcp,honcho,cron,cli]", ".")) {
+        Write-Host ""
+        info "  Installing from local wheels: hermes-agent$spec"
+        & $UvCmd pip install -e $spec --no-index --find-links "$WheelsDir"
+        if ($LASTEXITCODE -eq 0) {
+            $installed = $true
+            success "Installed from local wheels (offline)"
+            break
+        } else {
+            warn "    Offline install failed for $spec (exit: $LASTEXITCODE)"
+        }
+    }
+}
+
+# Online fallback: download from PyPI
+if (-not $installed) {
+    if ($triedOffline) {
+        hr
+        warn "Offline wheels incompatible with your Python version."
+        info "  Your Python: $FoundPyVersion"
+        info "  Wheels built for: Python 3.12"
+        info "  Switching to online install (network required)..."
+        hr
     } else {
-        warn "    $spec 安装失败 (exit code: $LASTEXITCODE)，尝试备选方案..."
+        info "Installing dependencies from PyPI (network required)..."
+        info "  Download progress will be shown below"
+    }
+
+    foreach ($spec in @(".[messaging,mcp,pty,honcho,cron,cli]", ".[messaging,mcp,honcho,cron,cli]", ".")) {
+        Write-Host ""
+        info "  Installing: hermes-agent$spec"
+        & $UvCmd pip install -e $spec
+        if ($LASTEXITCODE -eq 0) {
+            $installed = $true
+            break
+        } else {
+            warn "    $spec failed (exit: $LASTEXITCODE), trying next option..."
+        }
     }
 }
 
 if (-not $installed) {
     Write-Host ""
-    err "依赖安装失败，请检查网络连接后重试。"
-    info "常见原因："
-    info "  1. 网络不通 — 检查是否能访问 https://pypi.org"
-    info "  2. 代理/防火墙 — 尝试关闭系统代理或设置 pip 源为国内镜像"
-    info "  3. 磁盘空间不足 — 需要约 500 MB 空闲空间"
-    info "  4. 手动重试：进入 %InstallDir% 目录运行: uv pip install -e ."
+    err "Dependency installation failed."
+    info "Common causes:"
+    info "  1. No network — check internet access"
+    info "  2. Proxy/firewall — try disabling proxy or using a mirror"
+    info "  3. Disk full — need ~500 MB free space"
+    info "  4. Manual: cd $InstallDir && uv pip install -e ."
     Pop-Location; pause; exit 1
 }
-success "Python 依赖安装完成"
+success "Python dependencies installed"
 Pop-Location
 
-# ── Step 6：配置 PATH 与环境变量 ────────────────────────────────────────────
-info "正在配置环境变量..."
+# ── Step 6: Configure PATH and environment variables ───────────────────────
+info "Configuring environment variables..."
 $hermesBin = "$InstallDir\venv\Scripts"
 
 $curPath = [Environment]::GetEnvironmentVariable("Path","User")
 if ($curPath -notlike "*$hermesBin*") {
     [Environment]::SetEnvironmentVariable("Path","$hermesBin;$curPath","User")
-    success "已将 $hermesBin 加入用户 PATH"
+    success "Added $hermesBin to user PATH"
 } else {
-    info "PATH 已包含 hermes 目录，无需修改"
+    info "PATH already includes hermes directory"
 }
 
 $curHome = [Environment]::GetEnvironmentVariable("HERMES_HOME","User")
 if ($curHome -ne $HermesHome) {
     [Environment]::SetEnvironmentVariable("HERMES_HOME",$HermesHome,"User")
-    success "已设置 HERMES_HOME = $HermesHome"
+    success "Set HERMES_HOME = $HermesHome"
 }
 $env:HERMES_HOME = $HermesHome
 $env:Path = "$hermesBin;$env:Path"
 
-# ── Step 7：初始化数据目录（最小化，不同步 skills）─────────────────────────
-info "正在初始化数据目录..."
+# ── Step 7: Initialize data directory ──────────────────────────────────────
+info "Initializing data directory..."
 foreach ($sub in @("sessions","logs","memories","cron","hooks")) {
     New-Item -ItemType Directory -Force -Path "$HermesHome\$sub" | Out-Null
 }
 
-# .env（首次创建模板，已有则保留）
+# .env (create template on first run, preserve existing)
 $envPath = "$HermesHome\.env"
 $envIsNew = $false
 if (-not (Test-Path $envPath)) {
@@ -279,7 +327,7 @@ if (-not (Test-Path $envPath)) {
     else { New-Item -ItemType File -Force -Path $envPath | Out-Null }
     $envIsNew = $true
 } else {
-    info ".env 已存在，保留原文件"
+    info ".env already exists, preserving"
 }
 
 # config.yaml
@@ -288,53 +336,53 @@ if (-not (Test-Path $cfgPath)) {
     $tmpl = "$InstallDir\cli-config.yaml.example"
     if (Test-Path $tmpl) {
         Copy-Item $tmpl $cfgPath
-        success "已创建 $cfgPath"
+        success "Created $cfgPath"
     }
 } else {
-    info "config.yaml 已存在，保留原文件"
+    info "config.yaml already exists, preserving"
 }
 
-success "数据目录就绪：$HermesHome"
+success "Data directory ready: $HermesHome"
 
-# ── Step 8：API Key 配置 ────────────────────────────────────────────────────
+# ── Step 8: API Key configuration ──────────────────────────────────────────
 if ($envIsNew -and -not $SkipSetup) {
     hr
     Write-Host ""
     Write-Host "  ╔══════════════════════════════════════════════╗" -ForegroundColor Yellow
-    Write-Host "  ║  即将打开 API Key 配置文件，请立即填写！    ║" -ForegroundColor Yellow
-    Write-Host "  ║  把 sk-CHANGE_ME 替换为你的真实 Key        ║" -ForegroundColor Yellow
-    Write-Host "  ║  保存并关闭窗口即可                         ║" -ForegroundColor Yellow
+    Write-Host "  ║  Opening API Key config — fill in your key!  ║" -ForegroundColor Yellow
+    Write-Host "  ║  Replace sk-CHANGE_ME with your real key     ║" -ForegroundColor Yellow
+    Write-Host "  ║  Save and close the window to continue       ║" -ForegroundColor Yellow
     Write-Host "  ╚══════════════════════════════════════════════╝" -ForegroundColor Yellow
     Write-Host ""
-    info "按任意键打开 $envPath ..."
+    info "Press any key to open $envPath ..."
     pause | Out-Null
     Start-Process notepad $envPath
     Write-Host ""
-    info "填写 API Key 后保存关闭，然后重启终端运行 hermes 即可"
-    success "已创建 $envPath"
+    info "After filling in your API Key, restart terminal and run: hermes"
+    success "Created $envPath"
 } elseif (-not $envIsNew) {
-    info "API Key 配置文件已存在：$envPath"
+    info "API Key config already exists: $envPath"
 }
 
-# ── 完成 ────────────────────────────────────────────────────────────────────
+# ── Done ───────────────────────────────────────────────────────────────────
 hr
 Write-Host ""
-Write-Host "  ✓ 安装完成！" -ForegroundColor Green
+Write-Host "  ✓ Installation complete!" -ForegroundColor Green
 Write-Host ""
-Write-Host "  文件位置：" -ForegroundColor Gray
-Write-Host "    数据目录  $HermesHome"
-Write-Host "    API Key   $HermesHome\.env"
-Write-Host "    程序目录  $InstallDir"
+Write-Host "  File locations:" -ForegroundColor Gray
+Write-Host "    Data dir   $HermesHome"
+Write-Host "    API Key    $HermesHome\.env"
+Write-Host "    Program    $InstallDir"
 Write-Host ""
-Write-Host "  ⚡ 下一步（必须）：" -ForegroundColor Yellow
-Write-Host "    1. 如果还没填写 API Key，编辑：" -ForegroundColor White
+Write-Host "  Next steps (required):" -ForegroundColor Yellow
+Write-Host "    1. If you haven't filled in your API Key, edit:" -ForegroundColor White
 Write-Host "       $HermesHome\.env" -ForegroundColor Green
-Write-Host "    2. 重启终端，运行：" -ForegroundColor White
+Write-Host "    2. Restart terminal, then run:" -ForegroundColor White
 Write-Host "       hermes" -ForegroundColor Green
 Write-Host ""
-Write-Host "  可选：hermes setup  配置模型/终端/工具等高级设置" -ForegroundColor Gray
+Write-Host "  Optional: hermes setup   configure models/terminal/tools" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  Skills 安装（可选，安装后再按需添加）：" -ForegroundColor Gray
-Write-Host "    hermes skills   ← 浏览可用 Skills" -ForegroundColor DarkGray
+Write-Host "  Skills (install on demand after setup):" -ForegroundColor Gray
+Write-Host "    hermes skills   ← browse available skills" -ForegroundColor DarkGray
 Write-Host ""
 hr

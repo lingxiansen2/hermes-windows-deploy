@@ -33,7 +33,10 @@ launcher/build/
 launcher/dist/
 *.spec.bak
 
-# 排除系统文件
+# Exclude CI-bundled offline artifacts (generated, not source)
+wheels/
+uv.exe
+requirements-frozen.txt
 Thumbs.db
 Desktop.ini
 .DS_Store

@@ -1,37 +1,37 @@
 name: Release
 
-# 推送 v* 格式的 tag 时触发（如 v0.12.0）
+# Push v* tag to trigger (e.g. v0.12.0)
 on:
   push:
     tags:
       - "v*"
 
 permissions:
-  contents: write   # 允许创建 Release 和上传 Assets
+  contents: write
 
 jobs:
-  # ── 构建 Windows GUI 启动器 (Hermes.exe) ─────────────────
+  # ── Build Windows GUI launcher (Hermes.exe) ────────────
   build-exe:
-    name: 构建 Hermes.exe (Windows)
+    name: Build Hermes.exe (Windows)
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 安装 Python 3.11
+      - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: 安装 PyInstaller
+      - name: Install PyInstaller
         run: pip install pyinstaller
 
-      - name: 构建 Hermes.exe
+      - name: Build Hermes.exe
         working-directory: launcher
         run: pyinstaller Hermes_deploy.spec
 
-      - name: 验证产物
+      - name: Verify artifact
         run: |
           if (Test-Path launcher\dist\Hermes.exe) {
             $size = [math]::Round((Get-Item launcher\dist\Hermes.exe).Length / 1MB, 1)
@@ -41,18 +41,65 @@ jobs:
             exit 1
           }
 
-      - name: 上传 Hermes.exe
+      - name: Upload Hermes.exe
         uses: actions/upload-artifact@v4
         with:
           name: hermes-exe
           path: launcher/dist/Hermes.exe
           retention-days: 1
 
-  # ── 打包并发布 ──────────────────────────────────────────
+  # ── Bundle offline wheels + uv.exe ─────────────────────
+  bundle-offline:
+    name: Bundle offline wheels + uv
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install hermes-agent and download all wheels
+        shell: pwsh
+        run: |
+          Set-Location vendor/hermes-agent
+          uv pip install -e ".[messaging,mcp,honcho,cron,cli]"
+          uv pip freeze --exclude-editable | Out-File -Encoding utf8 ../../requirements-frozen.txt
+          uv pip download -r ../../requirements-frozen.txt -d ../../wheels/
+
+      - name: Download uv.exe standalone
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.exe" -OutFile uv.exe
+          Write-Host "uv.exe size: $((Get-Item uv.exe).Length / 1MB) MB"
+
+      - name: Show bundle stats
+        shell: pwsh
+        run: |
+          $wheelCount = (Get-ChildItem wheels/*.whl).Count
+          $wheelSize = [math]::Round((Get-ChildItem wheels/*.whl | Measure-Object Length -Sum).Sum / 1MB, 1)
+          Write-Host "Wheels: $wheelCount files, $wheelSize MB"
+
+      - name: Upload offline bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-bundle
+          path: |
+            wheels/
+            uv.exe
+          retention-days: 1
+
+  # ── Package and release ────────────────────────────────
   package:
-    name: 打包并发布
+    name: Package and release
     runs-on: ubuntu-latest
-    needs: build-exe
+    needs: [build-exe, bundle-offline]
 
     steps:
       - name: Checkout
@@ -60,130 +107,138 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 解析版本号
+      - name: Parse version
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      # ── 下载 Hermes.exe ──────────────────────────────────
-      - name: 下载 Hermes.exe
+      # ── Download artifacts ────────────────────────────
+      - name: Download Hermes.exe
         uses: actions/download-artifact@v4
         with:
           name: hermes-exe
           path: launcher/
 
-      - name: 确认 Hermes.exe
+      - name: Download offline bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: offline-bundle
+          path: bundled/
+
+      - name: Verify artifacts
         run: |
           ls -lh launcher/Hermes.exe
+          ls -lh bundled/uv.exe
+          ls bundled/wheels/ | head -5
+          echo "WHEEL_COUNT=$(ls bundled/wheels/*.whl | wc -l)" >> "$GITHUB_ENV"
           echo "EXE_SIZE=$(ls -lh launcher/Hermes.exe | awk '{print $5}')" >> "$GITHUB_ENV"
+          echo "BUNDLE_SIZE=$(du -sh bundled/ | awk '{print $1}')" >> "$GITHUB_ENV"
 
-      # ── 打包 Windows（zip）───────────────────────────────
-      - name: 打包 Windows zip
+      # ── Package Windows (zip) ─────────────────────────
+      - name: Package Windows zip
         run: |
           PKG="hermes-deploy-windows-${{ steps.version.outputs.VERSION }}"
           mkdir -p "dist/$PKG/windows"
           mkdir -p "dist/$PKG/vendor"
           mkdir -p "dist/$PKG/launcher"
 
-          # 安装脚本（根级入口 + windows 子目录）
+          # Install scripts (root + subdirectories)
           cp install.cmd               "dist/$PKG/"
           cp install.ps1               "dist/$PKG/"
           cp windows/install.ps1       "dist/$PKG/windows/"
           cp windows/install.cmd       "dist/$PKG/windows/"
           cp windows/install-extended.ps1 "dist/$PKG/windows/"
 
-          # 启动器
+          # Offline bundle (wheels + uv)
+          cp -r bundled/wheels         "dist/$PKG/"
+          cp bundled/uv.exe            "dist/$PKG/"
+
+          # Launcher
           cp launcher/Hermes.exe       "dist/$PKG/launcher/"
           cp launcher/icon.ico         "dist/$PKG/launcher/"
           cp launcher/app_icon.png     "dist/$PKG/launcher/"
           cp launcher/install_shortcut.ps1 "dist/$PKG/launcher/"
 
-          # 源码
-          cp -r vendor/hermes-agent "dist/$PKG/vendor/"
+          # Source
+          cp -r vendor/hermes-agent    "dist/$PKG/vendor/"
 
-          # 说明文件
-          cp README.md "dist/$PKG/"
+          # Docs
+          cp README.md                 "dist/$PKG/"
 
           cd dist
           zip -r "../${PKG}.zip" "$PKG"
           echo "WINDOWS_ZIP=${PKG}.zip" >> "$GITHUB_ENV"
 
-      # ── 打包 Linux（tar.gz）──────────────────────────────
-      - name: 打包 Linux tar.gz
+      # ── Package Linux (tar.gz) ─────────────────────────
+      - name: Package Linux tar.gz
         run: |
           PKG="hermes-deploy-linux-${{ steps.version.outputs.VERSION }}"
           mkdir -p "dist/$PKG/linux"
           mkdir -p "dist/$PKG/vendor"
 
-          # 安装脚本（根级入口 + linux 子目录）
+          # Install scripts (root + subdirectories)
           cp install.sh "dist/$PKG/"
           chmod +x "dist/$PKG/install.sh"
           cp linux/install.sh "dist/$PKG/linux/"
           chmod +x "dist/$PKG/linux/install.sh"
 
-          # 源码
+          # Source
           cp -r vendor/hermes-agent "dist/$PKG/vendor/"
 
-          # 说明文件
+          # Docs
           cp README.md "dist/$PKG/"
 
           cd dist
           tar -czf "../${PKG}.tar.gz" "$PKG"
           echo "LINUX_TARGZ=${PKG}.tar.gz" >> "$GITHUB_ENV"
 
-      # ── 生成 SHA256 校验文件 ──────────────────────────────
-      - name: 生成校验和
+      # ── Generate checksums ──────────────────────────────
+      - name: Generate checksums
         run: |
           sha256sum "$WINDOWS_ZIP" "$LINUX_TARGZ" > checksums.txt
           cat checksums.txt
 
-      # ── 创建 GitHub Release 并上传附件 ───────────────────
-      - name: 创建 Release
+      # ── Create GitHub Release ───────────────────────────
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: "v${{ steps.version.outputs.VERSION }}"
           body: |
-            ## Hermes Agent 一键部署包  v${{ steps.version.outputs.VERSION }}
+            ## Hermes Agent One-Click Deploy  v${{ steps.version.outputs.VERSION }}
 
-            ### 下载
+            ### Downloads
 
-            | 平台 | 文件 | 说明 |
-            |------|------|------|
-            | Windows 10/11 | `${{ env.WINDOWS_ZIP }}` | 含 GUI 启动器 (Hermes.exe ${{ env.EXE_SIZE }}) |
-            | Linux / macOS / WSL2 | `${{ env.LINUX_TARGZ }}` | 命令行安装 |
+            | Platform | File | Notes |
+            |----------|------|-------|
+            | Windows 10/11 | `${{ env.WINDOWS_ZIP }}` | Offline install — includes ${{ env.WHEEL_COUNT }} pre-bundled wheels (${{ env.BUNDLE_SIZE }}) + GUI launcher (Hermes.exe ${{ env.EXE_SIZE }}) |
+            | Linux / macOS / WSL2 | `${{ env.LINUX_TARGZ }}` | CLI install |
 
-            ### Windows 安装
+            ### Windows Installation
 
-            **基础安装（仅 CLI）：**
+            **Zero-network install:**
             ```
-            1. 下载并解压 ${{ env.WINDOWS_ZIP }}
-            2. 双击 install.cmd
-            3. 重启终端后运行 hermes setup
+            1. Download and extract ${{ env.WINDOWS_ZIP }}
+            2. Double-click install.cmd
+            3. Enter your API key when notepad opens
+            4. Restart terminal, run: hermes
             ```
+            No internet needed — all Python dependencies are bundled.
 
-            **拓展安装（含 GUI 启动器）：**
-            ```powershell
-            1. 下载并解压 ${{ env.WINDOWS_ZIP }}
-            2. Set-ExecutionPolicy Bypass -Scope Process -Force
-            3. .\windows\install-extended.ps1
-            4. 从开始菜单或桌面启动 "Hermes Agent"
-            ```
-
-            ### Linux / macOS / WSL2 安装
+            ### Linux / macOS / WSL2 Installation
             ```bash
             tar -xzf ${{ env.LINUX_TARGZ }}
             cd hermes-deploy-linux-${{ steps.version.outputs.VERSION }}
             bash install.sh
-            # 重载 shell 后运行 hermes setup
+            # Reload shell, then: hermes setup
             ```
 
-            ### 文件校验（SHA256）
+            ### File Verification (SHA256)
 
-            详见附件 `checksums.txt`
+            See attached `checksums.txt`
 
             ---
 
-            内置 Hermes Agent 版本：**v0.12.0**
-            上游项目：https://github.com/NousResearch/hermes-agent
+            Bundled Hermes Agent version: **v0.12.0**
+            Upstream: https://github.com/NousResearch/hermes-agent
           files: |
             ${{ env.WINDOWS_ZIP }}
             ${{ env.LINUX_TARGZ }}
