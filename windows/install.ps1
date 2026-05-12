@@ -63,15 +63,15 @@ if (Test-Path $PythonDest) {
 Copy-Item -Recurse -Path $PythonSrc -Destination $PythonDest
 success "Python copied to $PythonDest"
 
-# ── Step 2: Verify hermes command ──────────────────────────────────────────
-$hermesExe = "$PythonDest\Scripts\hermes.exe"
-if (-not (Test-Path $hermesExe)) {
-    err "hermes.exe not found after copy"
-    err "Expected: $hermesExe"
+# ── Step 2: Verify hermes launcher ─────────────────────────────────────────
+$hermesCmd = "$PythonDest\Scripts\hermes.cmd"
+if (-not (Test-Path $hermesCmd)) {
+    err "hermes.cmd not found after copy"
+    err "Expected: $hermesCmd"
     pause
     exit 1
 }
-success "hermes.exe ready"
+success "hermes launcher ready"
 
 # ── Step 3: Configure PATH ─────────────────────────────────────────────────
 info "Configuring environment..."
