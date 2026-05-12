@@ -89,6 +89,25 @@ jobs:
             exit 1
           }
 
+      - name: Ensure cron and cli modules are installed
+        shell: pwsh
+        run: |
+          # pip sometimes skips cron/ despite being in pyproject.toml's include list.
+          # Copy from vendor source if missing.
+          $pkgs = @("cron")
+          $missing = $false
+          foreach ($pkg in $pkgs) {
+            $dst = "python\Lib\site-packages\$pkg"
+            if (-not (Test-Path $dst)) {
+              Write-Host "WARNING: $pkg missing from pip install — copying from source"
+              Copy-Item -Recurse "vendor/hermes-agent/$pkg" $dst
+              $missing = $true
+            }
+          }
+          if ($missing) {
+            Write-Host "Fixed missing packages"
+          }
+
       - name: Replace hardcoded .exe launcher with portable .cmd
         shell: pwsh
         run: |
