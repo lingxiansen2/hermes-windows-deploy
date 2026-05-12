@@ -55,8 +55,8 @@ jobs:
         run: |
           $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.52.0.windows.1/PortableGit-2.52.0-64-bit.7z.exe"
           Invoke-WebRequest $gitUrl -OutFile git-portable.exe
-          # 7-Zip self-extractor: -o = output dir, -y = yes
-          Start-Process -Wait -FilePath .\git-portable.exe -ArgumentList '-ogit','-y'
+          # Extract with 7z (bundled on windows-latest)
+          7z x git-portable.exe -ogit -y
           Remove-Item git-portable.exe
           $gitSize = [math]::Round((Get-ChildItem git -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1)
           Write-Host "PortableGit extracted: $gitSize MB"
