@@ -106,9 +106,11 @@ if (-not $UvCmd) {
 success "uv ready: $UvCmd"
 
 # ── Step 2: Ensure Python >= 3.11 ──────────────────────────────────────────
+# When offline wheels are bundled, prefer Python 3.12 (matching wheel ABI)
 info "Checking Python >= $PYTHON_MIN_MAJOR.$PYTHON_MIN_MINOR..."
 $PythonOk = $false
 $FoundPyVersion = $null
+$OfflineTarget = "3.12"  # wheels are built for this version on CI
 
 function Test-PythonVersion {
     param([string]$VersionStr)
@@ -121,7 +123,20 @@ function Test-PythonVersion {
     return $false
 }
 
+# Strategy 0 (offline): if wheels are bundled, prefer Python 3.12 exactly
+if ($OfflineAvailable) {
+    try {
+        $p = & $UvCmd python find $OfflineTarget 2>$null
+        if ($p) {
+            $PythonOk = $true
+            $FoundPyVersion = $OfflineTarget
+            success "Python found (offline target): $(& $p --version 2>$null)"
+        }
+    } catch {}
+}
+
 # Strategy 1: uv python list — discover all installed versions, pick highest >= 3.11
+if (-not $PythonOk) {
 try {
     $uvList = & $UvCmd python list --only-installed 2>$null
     if ($uvList) {
@@ -147,6 +162,7 @@ try {
         }
     }
 } catch {}
+}
 
 # Strategy 2: system PATH python / python3
 if (-not $PythonOk) {
