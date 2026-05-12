@@ -62,14 +62,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install uv
-        run: pip install uv
-
-      - name: Download all wheels (resolve deps from pyproject.toml)
+      - name: Download all wheels
         shell: pwsh
         run: |
           Set-Location vendor/hermes-agent
-          uv pip download ".[messaging,mcp,honcho,cron,cli]" -d ../../wheels/
+          pip download ".[messaging,mcp,honcho,cron,cli]" -d ../../wheels/
 
       - name: Download uv.exe standalone
         shell: pwsh
