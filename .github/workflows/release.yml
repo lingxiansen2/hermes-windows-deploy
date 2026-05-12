@@ -62,11 +62,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Download all wheels
+      - name: Create venv, install, freeze, and download all wheels
         shell: pwsh
         run: |
-          Set-Location vendor/hermes-agent
-          pip download ".[messaging,mcp,honcho,cron,cli]" -d ../../wheels/
+          python -m venv .tmp-venv
+          .tmp-venv\Scripts\Activate.ps1
+          pip install -e "vendor/hermes-agent[messaging,mcp,honcho,cron,cli]"
+          pip freeze --exclude-editable | Out-File -Encoding utf8 requirements-frozen.txt
+          pip download -r requirements-frozen.txt -d wheels/
 
       - name: Download uv.exe standalone
         shell: pwsh
