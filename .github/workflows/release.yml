@@ -63,9 +63,11 @@ jobs:
           python\python.exe get-pip.py --no-warn-script-location
           Write-Host "pip installed: $(python\python.exe -m pip --version)"
 
-      - name: Install hermes-agent with all extras
+      - name: Install hermes-agent (portable, non-editable)
         shell: pwsh
         run: |
+          # Install build tools first (setuptools needed by pyproject.toml build)
+          python\python.exe -m pip install setuptools wheel
           # Try full install first, fall back without pty if needed
           $specs = @(
             "vendor/hermes-agent[messaging,mcp,pty,honcho,cron,cli]",
@@ -74,7 +76,7 @@ jobs:
           $ok = $false
           foreach ($s in $specs) {
             Write-Host "Installing: $s"
-            python\python.exe -m pip install -e "$s" 2>&1
+            python\python.exe -m pip install "$s" 2>&1
             if ($LASTEXITCODE -eq 0) {
               $ok = $true
               Write-Host "Success: $s"
