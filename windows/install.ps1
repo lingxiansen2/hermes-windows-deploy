@@ -63,6 +63,18 @@ if (Test-Path $PythonDest) {
 Copy-Item -Recurse -Path $PythonSrc -Destination $PythonDest
 success "Python copied to $PythonDest"
 
+# ── Step 1b: Copy portable Git ──────────────────────────────────────────────
+$GitSrc  = Join-Path $PkgRoot "git"
+$GitDest = "$HermesHome\git"
+if (Test-Path $GitSrc) {
+    info "Copying portable Git..."
+    if (Test-Path $GitDest) { Remove-Item -Recurse -Force $GitDest }
+    Copy-Item -Recurse -Path $GitSrc -Destination $GitDest
+    success "Git copied to $GitDest"
+} else {
+    warn "Portable Git not found in package (git/ missing), skipping"
+}
+
 # ── Step 2: Verify hermes launcher ─────────────────────────────────────────
 $hermesCmd = "$PythonDest\Scripts\hermes.cmd"
 if (-not (Test-Path $hermesCmd)) {
@@ -76,27 +88,34 @@ success "hermes launcher ready"
 # ── Step 3: Configure PATH ─────────────────────────────────────────────────
 info "Configuring environment..."
 $hermesBin = "$PythonDest\Scripts"
+$gitBin    = "$GitDest\bin"
 
 # Add to current session
-$env:Path = "$hermesBin;$env:Path"
+$env:Path = "$hermesBin;$gitBin;$env:Path"
 $env:HERMES_HOME = $HermesHome
 
 # Add to user PATH (persistent)
 $curPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($curPath -notlike "*$hermesBin*") {
-    [Environment]::SetEnvironmentVariable("Path", "$hermesBin;$curPath", "User")
-    success "Added to user PATH: $hermesBin"
-} else {
-    info "PATH already includes hermes"
+foreach ($bin in @($hermesBin, $gitBin)) {
+    if ((Test-Path $bin) -and ($curPath -notlike "*$bin*")) {
+        $curPath = "$bin;$curPath"
+        success "Added to user PATH: $bin"
+    }
 }
+[Environment]::SetEnvironmentVariable("Path", $curPath, "User")
 
 # Set HERMES_HOME
-$curHome = [Environment]::GetEnvironmentVariable("HERMES_HOME", "User")
-if ($curHome -ne $HermesHome) {
-    [Environment]::SetEnvironmentVariable("HERMES_HOME", $HermesHome, "User")
-    success "HERMES_HOME = $HermesHome"
-}
+[Environment]::SetEnvironmentVariable("HERMES_HOME", $HermesHome, "User")
+$env:HERMES_HOME = $HermesHome
+success "HERMES_HOME = $HermesHome"
 
+# Set HERMES_GIT_BASH_PATH (for shell commands)
+$bashExe = "$GitDest\bin\bash.exe"
+if (Test-Path $bashExe) {
+    [Environment]::SetEnvironmentVariable("HERMES_GIT_BASH_PATH", $bashExe, "User")
+    $env:HERMES_GIT_BASH_PATH = $bashExe
+    success "Git bash: $bashExe"
+}
 # ── Step 4: Initialize data directories ────────────────────────────────────
 info "Creating data directories..."
 foreach ($sub in @("sessions", "logs", "memories", "cron", "hooks")) {

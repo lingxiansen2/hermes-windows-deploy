@@ -33,8 +33,9 @@ launcher/build/
 launcher/dist/
 *.spec.bak
 
-# Exclude CI-bundled portable Python (generated, not source)
+# Exclude CI-bundled portable environments (generated, not source)
 python/
+git/
 .tmp-venv/
 requirements-frozen.txt
 Thumbs.db

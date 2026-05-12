@@ -50,6 +50,17 @@ jobs:
           Expand-Archive python.zip -DestinationPath python
           Write-Host "Python embeddable extracted"
 
+      - name: Download and extract PortableGit
+        shell: pwsh
+        run: |
+          $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.52.0.windows.1/PortableGit-2.52.0-64-bit.7z.exe"
+          Invoke-WebRequest $gitUrl -OutFile git-portable.exe
+          # 7-Zip self-extractor: -o = output dir, -y = yes
+          Start-Process -Wait -FilePath .\git-portable.exe -ArgumentList '-ogit','-y'
+          Remove-Item git-portable.exe
+          $gitSize = [math]::Round((Get-ChildItem git -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1)
+          Write-Host "PortableGit extracted: $gitSize MB"
+
       - name: Enable pip in embeddable Python
         shell: pwsh
         run: |
@@ -161,7 +172,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: portable-python
-          path: python/
+          path: |
+            python/
+            git/
           retention-days: 1
 
   # ── Package and release ────────────────────────────────
@@ -184,18 +197,20 @@ jobs:
           name: hermes-exe
           path: launcher/
 
-      - name: Download portable Python
+      - name: Download portable Python + Git
         uses: actions/download-artifact@v4
         with:
           name: portable-python
-          path: python/
+          path: bundled/
 
       - name: Verify artifacts
         run: |
           ls -lh launcher/Hermes.exe
-          ls python/python.exe python/Scripts/hermes.exe 2>/dev/null || echo "hermes.exe check failed"
+          ls bundled/python/python.exe bundled/python/Scripts/hermes.cmd 2>/dev/null || echo "check failed"
+          ls bundled/git/bin/bash.exe 2>/dev/null || echo "(git bash not verified)"
           echo "EXE_SIZE=$(ls -lh launcher/Hermes.exe | awk '{print $5}')" >> "$GITHUB_ENV"
-          echo "PY_SIZE=$(du -sh python/ | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "PY_SIZE=$(du -sh bundled/python/ | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "GIT_SIZE=$(du -sh bundled/git/ | awk '{print $1}')" >> "$GITHUB_ENV"
 
       # ── Package Windows (zip) ─────────────────────────
       - name: Package Windows zip
@@ -213,7 +228,9 @@ jobs:
           cp windows/install-extended.ps1 "dist/$PKG/windows/"
 
           # Portable Python (Python 3.12 + all deps pre-installed)
-          cp -r python                 "dist/$PKG/"
+          cp -r bundled/python         "dist/$PKG/"
+          # Portable Git (for bash shell support)
+          cp -r bundled/git            "dist/$PKG/"
 
           # Launcher
           cp launcher/Hermes.exe       "dist/$PKG/launcher/"
