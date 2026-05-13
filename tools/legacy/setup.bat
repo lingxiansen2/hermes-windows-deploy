@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-set "SCRIPT_DIR=%~dp0"
+set "SCRIPT_DIR=%~dp0..\..\"
 cd /d "%SCRIPT_DIR%"
 echo.
 echo ============================================================
@@ -157,10 +157,10 @@ for %%d in (sessions skills logs cron memories) do if not exist "%HERMES_HOME%\%
 echo   [OK] Hermes home prepared
 echo.
 echo [5/5] Installing optional skills and launcher shortcut...
-if exist "%SCRIPT_DIR%install_skills.bat" (
-    call "%SCRIPT_DIR%install_skills.bat"
+if exist "%SCRIPT_DIR%tools\legacy\install_skills.bat" (
+    call "%SCRIPT_DIR%tools\legacy\install_skills.bat"
 ) else (
-    echo [WARN] install_skills.bat was not found. Skipping skills.
+    echo [WARN] tools\legacy\install_skills.bat was not found. Skipping skills.
 )
 if exist "%SCRIPT_DIR%launcher\install_shortcut.ps1" (
     powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%launcher\install_shortcut.ps1"

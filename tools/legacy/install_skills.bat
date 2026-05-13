@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-set "ROOT=%~dp0"
+set "ROOT=%~dp0..\..\"
 set "HERMES_CMD="
 if exist "%ROOT%.venv\Scripts\hermes.exe" set "HERMES_CMD=%ROOT%.venv\Scripts\hermes.exe"
 if not defined HERMES_CMD where hermes >nul 2>&1 && set "HERMES_CMD=hermes"
