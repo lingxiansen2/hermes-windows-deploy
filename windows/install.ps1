@@ -122,7 +122,16 @@ foreach ($sub in @("sessions", "logs", "memories", "cron", "hooks")) {
     New-Item -ItemType Directory -Force -Path "$HermesHome\$sub" | Out-Null
 }
 
-# ── Step 5: Create .env (API Key) ──────────────────────────────────────────
+# ── Step 5: Create default config and .env (API Key) ───────────────────────
+$configPath = "$HermesHome\config.yaml"
+if (-not (Test-Path $configPath)) {
+    $configTmpl = Join-Path $PkgRoot "config.yaml"
+    if (Test-Path $configTmpl) {
+        Copy-Item $configTmpl $configPath
+        success "Config copied to $configPath"
+    }
+}
+
 $envPath = "$HermesHome\.env"
 $envIsNew = $false
 if (-not (Test-Path $envPath)) {
@@ -130,17 +139,39 @@ if (-not (Test-Path $envPath)) {
     if (Test-Path $tmpl) {
         Copy-Item $tmpl $envPath
     } else {
-        @"
-# Hermes Agent API Keys
-# Fill in at least one provider's key below.
-# DeepSeek (recommended): https://platform.deepseek.com/api_keys
-
-DEEPSEEK_API_KEY=sk-CHANGE_ME
-"@ | Out-File -Encoding utf8 $envPath
+        $defaultEnv = @(
+            "# Hermes Agent API Keys",
+            "# Fill in at least one provider's key below.",
+            "# DeepSeek: https://platform.deepseek.com/api_keys",
+            "",
+            "DEEPSEEK_API_KEY=sk-CHANGE_ME"
+        )
+        [System.IO.File]::WriteAllLines($envPath, $defaultEnv, [System.Text.UTF8Encoding]::new($false))
     }
     $envIsNew = $true
 } else {
     info ".env already exists, preserving"
+}
+
+# Local launcher for custom install locations where the user's PATH has not
+# refreshed yet. This keeps `D:\path\to\hermes\hermes.cmd` usable immediately.
+$localCmd = "$HermesHome\hermes.cmd"
+@(
+    '@echo off',
+    'set "HERMES_HOME=%~dp0"',
+    'set "HERMES_GIT_BASH_PATH=%~dp0git\bin\bash.exe"',
+    'set "PYTHONIOENCODING=utf-8"',
+    '"%~dp0python\Scripts\hermes.cmd" %*'
+) | Set-Content -Path $localCmd -Encoding ASCII
+success "Local launcher: $localCmd"
+
+# If the installer was launched elevated, the copied tree can otherwise remain
+# unwritable from a normal terminal. Grant the invoking user modify rights.
+try {
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    & icacls $HermesHome /grant "${currentUser}:(OI)(CI)M" /T /Q | Out-Null
+} catch {
+    warn "Could not update install directory permissions: $($_.Exception.Message)"
 }
 
 # ── Step 6: API Key prompt ─────────────────────────────────────────────────

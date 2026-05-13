@@ -1,40 +1,31 @@
 # Hermes Agent configuration
-# Default provider: DeepSeek V4 Pro
-models:
-  default:
-    provider: deepseek
-    model: deepseek-v4-pro
-    api_key: ${DEEPSEEK_API_KEY}
-    thinking:
-      type: enabled
-    reasoning_effort: high
+model:
+  default: deepseek-v4-pro
+  provider: deepseek
+  api_key: ${DEEPSEEK_API_KEY}
+  base_url: https://api.deepseek.com/v1
+
 auxiliary:
   default:
     provider: deepseek
     model: deepseek-v4-flash
     api_key: ${DEEPSEEK_API_KEY}
-    thinking:
-      type: disabled
+    base_url: https://api.deepseek.com/v1
   reasoning:
     provider: deepseek
     model: deepseek-v4-pro
     api_key: ${DEEPSEEK_API_KEY}
-    thinking:
-      type: enabled
-    reasoning_effort: high
-fallback:
-  provider: deepseek
-  model: deepseek-v4-flash
-  api_key: ${DEEPSEEK_API_KEY}
-  thinking:
-    type: disabled
+    base_url: https://api.deepseek.com/v1
+
 agent:
   max_turns: 50
   compression_threshold: 80000
+
 terminal:
   backend: local
   cwd: ""
   timeout: 180
   lifetime_seconds: 300
   auto_source_bashrc: false
-log_level: "INFO"
+
+log_level: INFO

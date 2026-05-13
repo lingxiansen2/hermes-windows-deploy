@@ -223,6 +223,8 @@ jobs:
           # Install scripts
           cp install.cmd               "dist/$PKG/"
           cp install.ps1               "dist/$PKG/"
+          cp config.yaml               "dist/$PKG/"
+          cp .env.example              "dist/$PKG/"
           cp windows/install.ps1       "dist/$PKG/windows/"
           cp windows/install.cmd       "dist/$PKG/windows/"
           cp windows/install-extended.ps1 "dist/$PKG/windows/"
@@ -260,6 +262,8 @@ jobs:
           cp linux/install.sh "dist/$PKG/linux/"
           chmod +x "dist/$PKG/linux/install.sh"
           cp -r vendor/hermes-agent "dist/$PKG/vendor/"
+          cp config.yaml "dist/$PKG/"
+          cp .env.example "dist/$PKG/"
           cp README.md "dist/$PKG/"
 
           cd dist
